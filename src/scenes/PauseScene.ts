@@ -12,8 +12,15 @@ import { makeButton } from '../ui/Button';
 import { getMuted, setMuted } from '../game/sound';
 
 export class PauseScene extends Phaser.Scene {
+  /** The level currently being played, so Restart reboots the same one. */
+  private level = 0;
+
   constructor() {
     super('pause');
+  }
+
+  init(data: { level?: number }): void {
+    this.level = typeof data?.level === 'number' ? data.level : 0;
   }
 
   create(): void {
@@ -37,9 +44,10 @@ export class PauseScene extends Phaser.Scene {
     }, { width: 380, height: 96, fontSize: 40, bg: COLORS.primary });
 
     makeButton(this, px, py - 30, '↻  Restart', () => {
-      // Full reset: stop the paused game and boot it fresh (create() re-inits all state).
+      // Full reset: stop the paused game and boot the SAME level fresh
+      // (create() re-inits all state: moves, goal progress, board).
       this.scene.stop('game');
-      this.scene.start('game');
+      this.scene.start('game', { level: this.level });
       this.scene.stop();
     }, { width: 380, height: 88 });
 

@@ -20,7 +20,8 @@ import { createGrid, findRuns, swapMakesRun, hasAnyMove, adjacent, type Grid, ty
 import {
   sfxSelect, sfxSwap, sfxInvalid, sfxMatch, sfxSpecialCreate, sfxRocket, sfxBomb,
 } from '../game/sound';
-import { getBest, setBest } from '../game/storage';
+import { getBest, setBest, getUnlocked, setUnlocked, setStars } from '../game/storage';
+import { getLevel, starsFor, goalLabel, LEVEL_COUNT, type Level } from '../game/levels';
 import { makeButton } from '../ui/Button';
 import { COLORS } from '../ui/theme';
 
@@ -52,8 +53,34 @@ export class GameScene extends Phaser.Scene {
   private comboText!: Phaser.GameObjects.Text;
   private ring!: Phaser.GameObjects.Graphics;
 
+  // ---- Phase 4: level / goal / moves state ----
+  /** Index of the level being played (0-based). Set in init(). */
+  private levelIndex = 0;
+  /** The active level's config (moves / goal / star thresholds). */
+  private level: Level = getLevel(0);
+  /** Moves remaining; decremented only on a committed swap. */
+  private movesLeft = 0;
+  /** Gems of the goal kind cleared so far (for 'collect' goals). */
+  private collected = 0;
+  /** True once win/lose has fired, so no further swaps or end-checks run. */
+  private ended = false;
+  private levelText!: Phaser.GameObjects.Text;
+  private movesText!: Phaser.GameObjects.Text;
+  private goalText!: Phaser.GameObjects.Text;
+
   constructor() {
     super('game');
+  }
+
+  /**
+   * Selects which level to play. Called by Phaser before create(): from the
+   * menu ('Play (Level N)'), from Win→Next and Lose→Retry, or with no data on a
+   * bare scene.start('game') — in which case we fall back to the furthest
+   * unlocked level. The index is clamped so it can never fall out of range.
+   */
+  init(data: { level?: number }): void {
+    const requested = typeof data?.level === 'number' ? data.level : getUnlocked();
+    this.levelIndex = Math.max(0, Math.min(LEVEL_COUNT - 1, requested));
   }
 
   create(): void {
@@ -66,10 +93,20 @@ export class GameScene extends Phaser.Scene {
     this.shown = 0;
     this.best = getBest();
 
+    // Fresh level state for this boot (Retry / Next / Restart all land here).
+    this.level = getLevel(this.levelIndex);
+    this.movesLeft = this.level.moves;
+    this.collected = 0;
+    this.ended = false;
+
     this.buildBackground();
     this.buildHud();
     this.buildTopBar();
     this.makeSparkTexture();
+
+    // Seed the HUD with this level's number, goal and move budget.
+    this.levelText.setText(`LEVEL ${this.levelIndex + 1}`);
+    this.updateHud();
 
     this.ring = this.add.graphics().setDepth(5).setVisible(false);
     this.ring.lineStyle(5, 0xffffff, 0.95);
@@ -89,7 +126,8 @@ export class GameScene extends Phaser.Scene {
   /** Top bar: a Pause button that freezes the board and raises the pause overlay. */
   private buildTopBar(): void {
     makeButton(this, GAME_W - 70, 60, '⏸', () => {
-      this.scene.launch('pause');
+      // Hand the current level to Pause so its Restart restarts THIS level.
+      this.scene.launch('pause', { level: this.levelIndex });
       this.scene.pause();
     }, { width: 84, height: 84, fontSize: 40, bg: COLORS.secondary, radius: 22 });
   }
@@ -105,18 +143,54 @@ export class GameScene extends Phaser.Scene {
   }
 
   private buildHud(): void {
-    this.add.text(GAME_W / 2, 90, 'FRUIT BLAST', {
-      fontFamily: 'system-ui, sans-serif', fontSize: '58px', fontStyle: '800', color: '#ffffff',
+    // Level number, big and centred up top.
+    this.levelText = this.add.text(GAME_W / 2, 48, 'LEVEL 1', {
+      fontFamily: 'system-ui, sans-serif', fontSize: '44px', fontStyle: '800', color: '#ffffff',
     }).setOrigin(0.5).setShadow(0, 4, '#00000066', 8);
-    this.add.text(GAME_W / 2, 176, 'SCORE', {
+
+    // Two stat columns: SCORE (left) and MOVES (right).
+    this.add.text(210, 126, 'SCORE', {
       fontFamily: 'system-ui', fontSize: '24px', fontStyle: '700', color: '#b9a7e6',
     }).setOrigin(0.5);
-    this.scoreText = this.add.text(GAME_W / 2, 230, '0', {
-      fontFamily: 'system-ui', fontSize: '64px', fontStyle: '800', color: '#ffd23f',
+    this.scoreText = this.add.text(210, 180, '0', {
+      fontFamily: 'system-ui', fontSize: '58px', fontStyle: '800', color: '#ffd23f',
     }).setOrigin(0.5);
+
+    this.add.text(510, 126, 'MOVES', {
+      fontFamily: 'system-ui', fontSize: '24px', fontStyle: '700', color: '#b9a7e6',
+    }).setOrigin(0.5);
+    this.movesText = this.add.text(510, 180, '0', {
+      fontFamily: 'system-ui', fontSize: '58px', fontStyle: '800', color: '#ffffff',
+    }).setOrigin(0.5);
+
+    // Goal readout spanning the width, just above the board.
+    this.goalText = this.add.text(GAME_W / 2, 292, '', {
+      fontFamily: 'system-ui', fontSize: '34px', fontStyle: '800', color: '#ffffff',
+    }).setOrigin(0.5).setShadow(0, 3, '#00000066', 6);
+
     this.comboText = this.add.text(GAME_W / 2, BOARD_Y + BOARD_H / 2, '', {
       fontFamily: 'system-ui', fontSize: '72px', fontStyle: '800', color: '#ffffff',
     }).setOrigin(0.5).setDepth(20).setAlpha(0).setShadow(0, 4, '#000000aa', 10);
+  }
+
+  /** Refresh the live HUD readouts: moves (turns red when low) and goal progress. */
+  private updateHud(): void {
+    this.movesText.setText(String(Math.max(0, this.movesLeft)));
+    this.movesText.setColor(this.movesLeft <= 3 ? '#ff5b6b' : '#ffffff');
+
+    const g = this.level.goal;
+    if (g.type === 'score') {
+      this.goalText.setText(`🎯  ${Math.min(this.score, g.target)} / ${g.target}`);
+    } else {
+      this.goalText.setText(`${KINDS[g.kind].glyph}  ${Math.min(this.collected, g.count)} / ${g.count}`);
+    }
+    this.goalText.setColor(this.goalMet() ? '#33d9a6' : '#ffffff');
+  }
+
+  /** True once the active level's goal is satisfied. */
+  private goalMet(): boolean {
+    const g = this.level.goal;
+    return g.type === 'score' ? this.score >= g.target : this.collected >= g.count;
   }
 
   private makeSparkTexture(): void {
@@ -223,7 +297,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onPointer(x: number, y: number): void {
-    if (this.busy) return;
+    if (this.busy || this.ended) return;
     const cell = this.cellAt(x, y);
     if (!cell) return;
     if (!this.selected) { this.select(cell); sfxSelect(); return; }
@@ -287,11 +361,53 @@ export class GameScene extends Phaser.Scene {
         }
       }
 
+      // A committed swap (normal or special-involving) spends exactly one move.
+      // Invalid swaps returned above, before this, so they never cost a move.
+      this.movesLeft--;
+      this.updateHud();
+
       await this.resolve({ pivotHints: [a, b], forcedSeeds, bombColorFor });
+
+      // resolve() loops to a fixed point, so the board is FULLY settled here —
+      // all cascades and special detonations are done. Only now do we judge the
+      // outcome, in priority order:
+      //   1) goal met  → win immediately (early-win, even with moves to spare)
+      //   2) moves gone → loss
+      //   3) otherwise, if the board has no legal swap, reshuffle (never a loss,
+      //      never costs a move) and play on.
+      if (this.goalMet()) { this.win(); return; }
+      if (this.movesLeft <= 0) { this.lose(); return; }
       if (!hasAnyMove(this.grid)) await this.reshuffle();
     } finally {
       this.busy = false;
     }
+  }
+
+  /** Goal reached: unlock the next level, bank stars, celebrate. */
+  private win(): void {
+    if (this.ended) return;
+    this.ended = true;
+    const stars = starsFor(this.level, this.score);
+    setUnlocked(this.levelIndex + 1); // open the next level (clamped by menu)
+    setStars(this.levelIndex, stars); // keep the best rating for this level
+    this.scene.launch('win', { level: this.levelIndex, score: this.score, stars });
+    this.scene.pause();
+  }
+
+  /** Out of moves with the goal unmet: show the defeat overlay. */
+  private lose(): void {
+    if (this.ended) return;
+    this.ended = true;
+    const g = this.level.goal;
+    const progress = g.type === 'score'
+      ? `You reached ${this.score} / ${g.target}`
+      : `Collected ${this.collected} / ${g.count}`;
+    this.scene.launch('lose', {
+      level: this.levelIndex,
+      goalText: goalLabel(g),
+      progressText: progress,
+    });
+    this.scene.pause();
   }
 
   // ---------- match resolution ----------
@@ -342,15 +458,19 @@ export class GameScene extends Phaser.Scene {
       }
 
       // 7) Clear tiles, keeping grid / specials / tiles in sync.
+      const goal = this.level.goal;
       const pops: Promise<void>[] = [];
       for (const key of toClear) {
         const [r, c] = key.split(',').map(Number);
+        // Count toward a 'collect' goal by the tile's own kind, before it clears.
+        if (goal.type === 'collect' && this.grid[r][c] === goal.kind) this.collected++;
         const tile = this.tiles[r][c];
         if (tile) { this.burst(tile.x, tile.y, KINDS[this.grid[r][c]].color); pops.push(this.popTile(tile)); }
         this.tiles[r][c] = null;
         this.grid[r][c] = -1;
         this.specials[r][c] = 'none';
       }
+      this.updateHud(); // reflect new score / collected progress live
 
       // 8) Forge the new specials in place (grid kind stays; only the visual + specials flag change).
       for (const [key, { special, kind }] of newSpecials) {

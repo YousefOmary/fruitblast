@@ -5,6 +5,8 @@ import { MenuScene } from './scenes/MenuScene';
 import { GameScene } from './scenes/GameScene';
 import { PauseScene } from './scenes/PauseScene';
 import { SettingsScene } from './scenes/SettingsScene';
+import { WinScene } from './scenes/WinScene';
+import { LoseScene } from './scenes/LoseScene';
 
 new Phaser.Game({
   type: Phaser.AUTO,
@@ -17,5 +19,5 @@ new Phaser.Game({
     height: GAME_H,
   },
   // MenuScene boots first; the rest are started/launched on demand.
-  scene: [MenuScene, GameScene, PauseScene, SettingsScene],
+  scene: [MenuScene, GameScene, PauseScene, SettingsScene, WinScene, LoseScene],
 });
