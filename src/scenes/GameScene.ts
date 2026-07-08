@@ -2,22 +2,44 @@
  * The playable board: renders the grid as gem tiles, handles swap input, and
  * runs the animated match → clear → gravity → cascade loop with particles,
  * screen shake, combo scoring and sound. This is the "juice" layer; all the
- * rules live in game/matchLogic.ts.
+ * pure rules live in game/matchLogic.ts.
+ *
+ * Phase 2 adds special tiles (line-clearers + colour bombs). Specials are held
+ * in a `specials[][]` grid kept in lock-step with `grid` (kinds) and `tiles`
+ * (containers) across every mutation: swap, clear, collapse and reshuffle. All
+ * three arrays are always indexed the same way — if you touch one at [r][c] you
+ * must touch the others, or specials will silently desync from their gems.
  */
 
 import Phaser from 'phaser';
 import {
   BOARD_X, BOARD_Y, BOARD_W, BOARD_H, COLS, ROWS, TILE, KINDS, TILE_POINTS,
-  GAME_W, cellCenter,
+  SPECIAL_CREATE_POINTS, SPECIAL_DETONATE_POINTS, GAME_W, cellCenter, type Special,
 } from '../game/config';
-import { createGrid, findRuns, swapMakesRun, hasAnyMove, adjacent, type Grid } from '../game/matchLogic';
-import { sfxSelect, sfxSwap, sfxInvalid, sfxMatch } from '../game/sound';
+import { createGrid, findRuns, swapMakesRun, hasAnyMove, adjacent, type Grid, type Run } from '../game/matchLogic';
+import {
+  sfxSelect, sfxSwap, sfxInvalid, sfxMatch, sfxSpecialCreate, sfxRocket, sfxBomb,
+} from '../game/sound';
 
 type Tile = Phaser.GameObjects.Container;
+/** A board coordinate. */
+interface Cell { r: number; c: number }
+/** One special firing, recorded during detonation so we can play its VFX. */
+interface Detonation { type: Special; r: number; c: number; color: number }
+/** Optional inputs for one resolve pass (only honoured on the first cascade step). */
+interface ResolveOpts {
+  /** Preferred pivot cells when a swap forges a special (the two swapped cells). */
+  pivotHints?: Cell[];
+  /** Specials to detonate unconditionally, e.g. one swapped into place with no run. */
+  forcedSeeds?: Cell[];
+  /** Overrides the colour a specific bomb (by "r,c" key) clears — used for bomb+normal swaps. */
+  bombColorFor?: Map<string, number>;
+}
 
 export class GameScene extends Phaser.Scene {
   private grid: Grid = [];
   private tiles: (Tile | null)[][] = [];
+  private specials: Special[][] = [];
   private selected: { r: number; c: number } | null = null;
   private busy = true;
   private score = 0;
@@ -42,22 +64,10 @@ export class GameScene extends Phaser.Scene {
 
     this.grid = createGrid();
     this.tiles = Array.from({ length: ROWS }, () => Array<Tile | null>(COLS).fill(null));
+    this.specials = Array.from({ length: ROWS }, () => Array<Special>(COLS).fill('none'));
     this.spawnInitialTiles();
 
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.onPointer(p.x, p.y));
-    (window as unknown as { __scene: GameScene }).__scene = this;
-  }
-
-  /** Debug snapshot (temporary). */
-  debugInfo(): Record<string, unknown> {
-    return {
-      busy: this.busy,
-      row0y: this.tiles[0][0]?.y,
-      row7y: this.tiles[7][0]?.y,
-      expectedRow0: cellCenter(0, 0).y,
-      expectedRow7: cellCenter(7, 0).y,
-      activeTweens: this.tweens.getTweens().length,
-    };
   }
 
   // ---------- scenery ----------
@@ -94,17 +104,59 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ---------- tiles ----------
-  private makeTile(r: number, c: number, kind: number, startY: number): Tile {
+  /**
+   * Build a tile container. `special` decorates it: line tiles get a bright
+   * stripe + ↔/↕, the bomb gets a dark gem with a colour core + ✦ and a pulsing
+   * glow so the colour it will clear stays readable.
+   */
+  private makeTile(r: number, c: number, kind: number, startY: number, special: Special = 'none'): Tile {
     const { x } = cellCenter(r, c);
     const { color, glyph } = KINDS[kind];
+    const children: Phaser.GameObjects.GameObject[] = [];
+
     const gem = this.add.graphics();
-    gem.fillStyle(color, 1);
-    gem.fillRoundedRect(-TILE / 2 + 5, -TILE / 2 + 5, TILE - 10, TILE - 10, 16);
-    gem.fillStyle(0xffffff, 0.22);
-    gem.fillRoundedRect(-TILE / 2 + 5, -TILE / 2 + 5, TILE - 10, (TILE - 10) / 2, 16);
-    const label = this.add.text(0, 2, glyph, { fontSize: '40px' }).setOrigin(0.5);
-    const tile = this.add.container(x, startY, [gem, label]);
+    if (special === 'bomb') {
+      gem.fillStyle(0x1b1030, 1);
+      gem.fillRoundedRect(-TILE / 2 + 5, -TILE / 2 + 5, TILE - 10, TILE - 10, 18);
+      gem.fillStyle(color, 0.92); // colour core: which colour this bomb clears
+      gem.fillCircle(0, 0, 17);
+      gem.lineStyle(4, color, 1);
+      gem.strokeRoundedRect(-TILE / 2 + 5, -TILE / 2 + 5, TILE - 10, TILE - 10, 18);
+    } else {
+      gem.fillStyle(color, 1);
+      gem.fillRoundedRect(-TILE / 2 + 5, -TILE / 2 + 5, TILE - 10, TILE - 10, 16);
+      gem.fillStyle(0xffffff, 0.22);
+      gem.fillRoundedRect(-TILE / 2 + 5, -TILE / 2 + 5, TILE - 10, (TILE - 10) / 2, 16);
+    }
+    children.push(gem);
+
+    if (special === 'lineH' || special === 'lineV') {
+      const stripe = this.add.graphics();
+      stripe.fillStyle(0xffffff, 0.85);
+      if (special === 'lineH') stripe.fillRoundedRect(-TILE / 2 + 6, -6, TILE - 12, 12, 6);
+      else stripe.fillRoundedRect(-6, -TILE / 2 + 6, 12, TILE - 12, 6);
+      children.push(stripe);
+      children.push(this.add.text(0, special === 'lineH' ? -20 : 22,
+        special === 'lineH' ? '↔' : '↕',
+        { fontSize: '24px', fontStyle: '800', color: '#ffffff' }).setOrigin(0.5));
+      children.push(this.add.text(0, special === 'lineH' ? 18 : -20, glyph, { fontSize: '28px' }).setOrigin(0.5));
+    } else if (special === 'bomb') {
+      children.push(this.add.text(0, 0, '✦', { fontSize: '40px', fontStyle: '800', color: '#ffffff' }).setOrigin(0.5));
+    } else {
+      children.push(this.add.text(0, 2, glyph, { fontSize: '40px' }).setOrigin(0.5));
+    }
+
+    if (special !== 'none') {
+      const glow = this.add.graphics();
+      glow.lineStyle(3, 0xffffff, 1);
+      glow.strokeRoundedRect(-TILE / 2 + 3, -TILE / 2 + 3, TILE - 6, TILE - 6, 18);
+      children.push(glow);
+      this.tweens.add({ targets: glow, alpha: { from: 0.9, to: 0.15 }, yoyo: true, repeat: -1, duration: 520 });
+    }
+
+    const tile = this.add.container(x, startY, children);
     tile.setData('kind', kind);
+    tile.setData('special', special);
     return tile;
   }
 
@@ -130,6 +182,12 @@ export class GameScene extends Phaser.Scene {
     return new Promise((res) => {
       this.tweens.add({ targets: tile, x, y, duration: 180, ease: 'Quad.easeInOut', onComplete: () => res() });
     });
+  }
+
+  /** Kill any tweens on a tile and its children before destroying it (stops orphaned glow pulses). */
+  private killTileTweens(tile: Tile): void {
+    this.tweens.killTweensOf(tile);
+    for (const child of tile.getAll()) this.tweens.killTweensOf(child);
   }
 
   // ---------- input ----------
@@ -163,51 +221,201 @@ export class GameScene extends Phaser.Scene {
 
   private async attemptSwap(a: { r: number; c: number }, b: { r: number; c: number }): Promise<void> {
     this.busy = true;
-    const ta = this.tiles[a.r][a.c]!, tb = this.tiles[b.r][b.c]!;
-    const pa = cellCenter(a.r, a.c), pb = cellCenter(b.r, b.c);
-    sfxSwap();
-    if (swapMakesRun(this.grid, a.r, a.c, b.r, b.c)) {
+    try {
+      const ta = this.tiles[a.r][a.c]!, tb = this.tiles[b.r][b.c]!;
+      const pa = cellCenter(a.r, a.c), pb = cellCenter(b.r, b.c);
+      sfxSwap();
+
+      // A swap involving a special is always legal, even with no matching run.
+      const specialInvolved = this.specials[a.r][a.c] !== 'none' || this.specials[b.r][b.c] !== 'none';
+      const makesRun = swapMakesRun(this.grid, a.r, a.c, b.r, b.c);
+
+      if (!makesRun && !specialInvolved) {
+        sfxInvalid();
+        await Promise.all([this.slideTile(ta, pb.x, pb.y), this.slideTile(tb, pa.x, pa.y)]);
+        await Promise.all([this.slideTile(ta, pa.x, pa.y), this.slideTile(tb, pb.x, pb.y)]);
+        this.cameras.main.shake(120, 0.006);
+        return;
+      }
+
+      // Commit the swap across all three parallel arrays.
       [this.grid[a.r][a.c], this.grid[b.r][b.c]] = [this.grid[b.r][b.c], this.grid[a.r][a.c]];
+      [this.specials[a.r][a.c], this.specials[b.r][b.c]] = [this.specials[b.r][b.c], this.specials[a.r][a.c]];
       this.tiles[a.r][a.c] = tb; this.tiles[b.r][b.c] = ta;
       await Promise.all([this.slideTile(ta, pb.x, pb.y), this.slideTile(tb, pa.x, pa.y)]);
-      await this.resolve();
+
+      // Force-detonate any special that took part in the swap (post-swap positions).
+      const forcedSeeds: Cell[] = [];
+      const bombColorFor = new Map<string, number>();
+      const spA = this.specials[a.r][a.c], spB = this.specials[b.r][b.c];
+      if (spA === 'bomb' && spB === 'bomb') {
+        // Bomb + bomb: clear the whole board.
+        for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) forcedSeeds.push({ r, c });
+      } else {
+        if (spA !== 'none') {
+          forcedSeeds.push({ r: a.r, c: a.c });
+          if (spA === 'bomb' && spB === 'none') bombColorFor.set(`${a.r},${a.c}`, this.grid[b.r][b.c]);
+        }
+        if (spB !== 'none') {
+          forcedSeeds.push({ r: b.r, c: b.c });
+          if (spB === 'bomb' && spA === 'none') bombColorFor.set(`${b.r},${b.c}`, this.grid[a.r][a.c]);
+        }
+      }
+
+      await this.resolve({ pivotHints: [a, b], forcedSeeds, bombColorFor });
       if (!hasAnyMove(this.grid)) await this.reshuffle();
-    } else {
-      sfxInvalid();
-      await Promise.all([this.slideTile(ta, pb.x, pb.y), this.slideTile(tb, pa.x, pa.y)]);
-      await Promise.all([this.slideTile(ta, pa.x, pa.y), this.slideTile(tb, pb.x, pb.y)]);
-      this.cameras.main.shake(120, 0.006);
+    } finally {
+      this.busy = false;
     }
-    this.busy = false;
   }
 
   // ---------- match resolution ----------
-  private async resolve(): Promise<void> {
+  /**
+   * Run the match → clear → collapse cascade to a fixed point. On the first
+   * step it also honours any forced special detonations from a swap, and forges
+   * a new special for every run of 4+.
+   */
+  private async resolve(opts: ResolveOpts = {}): Promise<void> {
     for (let step = 0; ; step++) {
       const runs = findRuns(this.grid);
-      if (runs.length === 0) break;
-      const cleared = new Set<string>();
-      for (const run of runs) for (const [r, c] of run.cells) cleared.add(`${r},${c}`);
+      const forced = step === 0 ? (opts.forcedSeeds ?? []) : [];
+      if (runs.length === 0 && forced.length === 0) break;
 
-      this.addScore(cleared.size * TILE_POINTS * (step + 1));
-      if (step >= 1) this.popCombo(step + 1);
-      sfxMatch(step);
-      this.cameras.main.shake(140, Math.min(0.004 + cleared.size * 0.0006, 0.02));
+      // 1) A run of 4+ forges a special at a pivot cell; that cell survives.
+      const newSpecials = new Map<string, { special: Special; kind: number }>();
+      for (const run of runs) {
+        if (run.cells.length < 4) continue;
+        const special: Special = run.cells.length >= 5 ? 'bomb' : (run.horizontal ? 'lineH' : 'lineV');
+        const [pr, pc] = this.choosePivot(run, step === 0 ? opts.pivotHints : undefined);
+        newSpecials.set(`${pr},${pc}`, { special, kind: run.kind });
+      }
 
+      // 2) Seed the clear with every run cell (minus surviving pivots) plus forced detonations.
+      const seeds: Cell[] = [];
+      for (const run of runs) for (const [r, c] of run.cells) {
+        if (!newSpecials.has(`${r},${c}`)) seeds.push({ r, c });
+      }
+      for (const f of forced) seeds.push(f);
+
+      // 3) Expand through any specials caught in the blast (recursive, visited-guarded).
+      const { toClear, detonations } = this.computeDetonation(seeds, step === 0 ? opts.bombColorFor : undefined);
+
+      // 4) Never clear a cell that is about to become a fresh special.
+      for (const key of newSpecials.keys()) toClear.delete(key);
+
+      // 5) Score, sound, camera and combo feedback.
+      const base = toClear.size * TILE_POINTS * (step + 1);
+      const bonus = newSpecials.size * SPECIAL_CREATE_POINTS + detonations.length * SPECIAL_DETONATE_POINTS;
+      this.addScore(base + bonus);
+      this.playFeedback(step, detonations, newSpecials.size);
+
+      // 6) Detonation VFX (beams / flashes) before the tiles vanish.
+      for (const d of detonations) {
+        if (d.type === 'lineH') this.beam(true, d.r, d.c, d.color);
+        else if (d.type === 'lineV') this.beam(false, d.r, d.c, d.color);
+        else this.bombFlash(cellCenter(d.r, d.c).x, cellCenter(d.r, d.c).y, d.color);
+      }
+
+      // 7) Clear tiles, keeping grid / specials / tiles in sync.
       const pops: Promise<void>[] = [];
-      for (const key of cleared) {
+      for (const key of toClear) {
         const [r, c] = key.split(',').map(Number);
         const tile = this.tiles[r][c];
         if (tile) { this.burst(tile.x, tile.y, KINDS[this.grid[r][c]].color); pops.push(this.popTile(tile)); }
         this.tiles[r][c] = null;
         this.grid[r][c] = -1;
+        this.specials[r][c] = 'none';
       }
+
+      // 8) Forge the new specials in place (grid kind stays; only the visual + specials flag change).
+      for (const [key, { special, kind }] of newSpecials) {
+        const [r, c] = key.split(',').map(Number);
+        const old = this.tiles[r][c];
+        if (old) { this.killTileTweens(old); old.destroy(); }
+        const tile = this.makeTile(r, c, kind, cellCenter(r, c).y, special);
+        tile.setScale(0.2);
+        this.tweens.add({ targets: tile, scale: 1, duration: 260, ease: 'Back.easeOut' });
+        this.tiles[r][c] = tile;
+        this.specials[r][c] = special;
+        this.grid[r][c] = kind;
+      }
+      if (newSpecials.size > 0) sfxSpecialCreate();
+
       await Promise.all(pops);
       await this.collapse();
     }
   }
 
+  /**
+   * Grow a clear set from `seeds`, detonating every special it touches and
+   * chaining into whatever those clear. A `fired` guard makes each special
+   * detonate exactly once, so bomb→bomb→line chains always terminate.
+   */
+  private computeDetonation(seeds: Cell[], bombColorFor?: Map<string, number>): {
+    toClear: Set<string>; detonations: Detonation[];
+  } {
+    const toClear = new Set<string>();
+    const fired = new Set<string>();
+    const detonations: Detonation[] = [];
+    const queue: Cell[] = [...seeds];
+
+    while (queue.length > 0) {
+      const { r, c } = queue.pop()!;
+      if (r < 0 || r >= ROWS || c < 0 || c >= COLS) continue;
+      if (this.grid[r][c] < 0) continue; // already empty
+      const key = `${r},${c}`;
+      toClear.add(key);
+
+      const sp = this.specials[r][c];
+      if (sp === 'none' || fired.has(key)) continue;
+      fired.add(key);
+      const kind = this.grid[r][c];
+      if (sp === 'lineH') {
+        detonations.push({ type: 'lineH', r, c, color: KINDS[kind].color });
+        for (let cc = 0; cc < COLS; cc++) queue.push({ r, c: cc });
+      } else if (sp === 'lineV') {
+        detonations.push({ type: 'lineV', r, c, color: KINDS[kind].color });
+        for (let rr = 0; rr < ROWS; rr++) queue.push({ r: rr, c });
+      } else if (sp === 'bomb') {
+        const target = bombColorFor?.get(key) ?? kind;
+        detonations.push({ type: 'bomb', r, c, color: KINDS[target].color });
+        for (let rr = 0; rr < ROWS; rr++) for (let cc = 0; cc < COLS; cc++) {
+          if (this.grid[rr][cc] === target) queue.push({ r: rr, c: cc });
+        }
+      }
+    }
+    return { toClear, detonations };
+  }
+
+  /** Pick the cell a new special is forged at: a swapped cell if it's in the run, else the middle. */
+  private choosePivot(run: Run, hints?: Cell[]): [number, number] {
+    if (hints) {
+      for (const h of hints) {
+        if (run.cells.some(([r, c]) => r === h.r && c === h.c)) return [h.r, h.c];
+      }
+    }
+    return run.cells[Math.floor(run.cells.length / 2)];
+  }
+
+  /** Sound + combo text for one clear step, called out by the biggest special involved. */
+  private playFeedback(step: number, detonations: Detonation[], created: number): void {
+    const hasBomb = detonations.some((d) => d.type === 'bomb');
+    const hasLine = detonations.some((d) => d.type === 'lineH' || d.type === 'lineV');
+    if (hasBomb) sfxBomb();
+    else if (hasLine) sfxRocket();
+    else sfxMatch(step);
+
+    const shakeAmt = Math.min(0.004 + (hasBomb ? 0.012 : hasLine ? 0.008 : 0), 0.02);
+    this.cameras.main.shake(hasBomb ? 240 : hasLine ? 180 : 140, shakeAmt || 0.004);
+
+    if (hasBomb) this.popCombo(0, 'BOOM!');
+    else if (hasLine) this.popCombo(0, 'ROCKET!');
+    else if (created > 0) this.popCombo(0, 'POWER-UP!');
+    else if (step >= 1) this.popCombo(step + 1);
+  }
+
   private popTile(tile: Tile): Promise<void> {
+    this.killTileTweens(tile);
     return new Promise((res) => {
       this.tweens.add({
         targets: tile, scale: 1.4, alpha: 0, duration: 200, ease: 'Back.easeIn',
@@ -225,6 +433,38 @@ export class GameScene extends Phaser.Scene {
     this.time.delayedCall(500, () => e.destroy());
   }
 
+  /** A bright beam sweeping a full row (horizontal) or column, then fading. */
+  private beam(horizontal: boolean, r: number, c: number, color: number): void {
+    const g = this.add.graphics().setDepth(16).setBlendMode(Phaser.BlendModes.ADD);
+    const thick = TILE * 0.5;
+    g.fillStyle(0xffffff, 0.9);
+    if (horizontal) {
+      const y = cellCenter(r, 0).y;
+      g.fillRoundedRect(BOARD_X, y - thick / 2, BOARD_W, thick, thick / 2);
+    } else {
+      const x = cellCenter(0, c).x;
+      g.fillRoundedRect(x - thick / 2, BOARD_Y, thick, BOARD_H, thick / 2);
+    }
+    this.tweens.add({ targets: g, alpha: 0, duration: 340, ease: 'Cubic.easeOut', onComplete: () => g.destroy() });
+    // Coloured spark trail along the line.
+    const line = horizontal
+      ? Array.from({ length: COLS }, (_, i) => cellCenter(r, i))
+      : Array.from({ length: ROWS }, (_, i) => cellCenter(i, c));
+    for (const p of line) this.burst(p.x, p.y, color);
+  }
+
+  /** Radial flash for a colour-bomb blast. */
+  private bombFlash(x: number, y: number, color: number): void {
+    const flash = this.add.graphics().setPosition(x, y).setDepth(16).setBlendMode(Phaser.BlendModes.ADD);
+    flash.fillStyle(0xffffff, 0.9);
+    flash.fillCircle(0, 0, TILE * 0.6);
+    this.tweens.add({ targets: flash, scale: 3.2, alpha: 0, duration: 420, ease: 'Cubic.easeOut', onComplete: () => flash.destroy() });
+    const ring = this.add.graphics().setPosition(x, y).setDepth(16).setBlendMode(Phaser.BlendModes.ADD);
+    ring.lineStyle(6, color, 0.9);
+    ring.strokeCircle(0, 0, TILE * 0.6);
+    this.tweens.add({ targets: ring, scale: 4, alpha: 0, duration: 480, ease: 'Cubic.easeOut', onComplete: () => ring.destroy() });
+  }
+
   /** Drop surviving tiles into gaps and spawn new ones from above. */
   private async collapse(): Promise<void> {
     const proms: Promise<void>[] = [];
@@ -233,7 +473,9 @@ export class GameScene extends Phaser.Scene {
       for (let r = ROWS - 1; r >= 0; r--) {
         if (this.grid[r][c] < 0) continue;
         if (r !== write) {
+          // Move kind, special and container together so the three stay aligned.
           this.grid[write][c] = this.grid[r][c]; this.grid[r][c] = -1;
+          this.specials[write][c] = this.specials[r][c]; this.specials[r][c] = 'none';
           const tile = this.tiles[r][c]!; this.tiles[write][c] = tile; this.tiles[r][c] = null;
           proms.push(this.moveTile(tile, cellCenter(write, c).y, 0, 'Bounce.easeOut'));
         }
@@ -242,6 +484,7 @@ export class GameScene extends Phaser.Scene {
       for (let r = write; r >= 0; r--) {
         const kind = Math.floor(Math.random() * KINDS.length);
         this.grid[r][c] = kind;
+        this.specials[r][c] = 'none';
         const startY = cellCenter(0, c).y - (write - r + 1) * TILE - 40;
         const tile = this.makeTile(r, c, kind, startY);
         this.tiles[r][c] = tile;
@@ -255,7 +498,9 @@ export class GameScene extends Phaser.Scene {
     this.popCombo(0, 'No moves — reshuffling!');
     this.grid = createGrid();
     for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
-      this.tiles[r][c]?.destroy();
+      const old = this.tiles[r][c];
+      if (old) { this.killTileTweens(old); old.destroy(); }
+      this.specials[r][c] = 'none';
       this.tiles[r][c] = this.makeTile(r, c, this.grid[r][c], cellCenter(r, c).y - BOARD_H - 100);
     }
     const proms: Promise<void>[] = [];

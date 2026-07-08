@@ -30,8 +30,22 @@ export const KINDS: TileKind[] = [
 
 export const KIND_COUNT = KINDS.length;
 
+/**
+ * A power-up carried by a tile. 'none' is an ordinary gem; 'lineH'/'lineV'
+ * clear a full row/column when detonated; 'bomb' clears every tile of one
+ * colour. Specials live on the scene (see GameScene.specials) in lock-step
+ * with the pure kind grid — matchLogic never sees them.
+ */
+export type Special = 'none' | 'lineH' | 'lineV' | 'bomb';
+
 /** Points per tile cleared (multiplied by the cascade step). */
 export const TILE_POINTS = 20;
+
+/** Bonus awarded for forging a special tile from a 4+ match. */
+export const SPECIAL_CREATE_POINTS = 60;
+
+/** Bonus awarded each time a special tile detonates. */
+export const SPECIAL_DETONATE_POINTS = 50;
 
 /** Pixel centre of the cell at (row, col). */
 export function cellCenter(row: number, col: number): { x: number; y: number } {

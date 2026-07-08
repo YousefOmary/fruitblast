@@ -12,6 +12,8 @@ export type Grid = number[][];
 export interface Run {
   kind: number;
   cells: Array<[number, number]>;
+  /** True for a left-right run (clears a row), false for a top-bottom run. */
+  horizontal: boolean;
 }
 
 const randKind = (): number => Math.floor(Math.random() * KIND_COUNT);
@@ -38,7 +40,7 @@ export function createGrid(): Grid {
 /** Every horizontal and vertical run of 3+ identical, non-empty tiles. */
 export function findRuns(grid: Grid): Run[] {
   const runs: Run[] = [];
-  const scan = (line: Array<[number, number]>): void => {
+  const scan = (line: Array<[number, number]>, horizontal: boolean): void => {
     let start = 0;
     for (let i = 1; i <= line.length; i++) {
       const [r0, c0] = line[start];
@@ -46,15 +48,15 @@ export function findRuns(grid: Grid): Run[] {
       const same =
         i < line.length && kind >= 0 && grid[line[i][0]][line[i][1]] === kind;
       if (same) continue;
-      if (i - start >= 3 && kind >= 0) runs.push({ kind, cells: line.slice(start, i) });
+      if (i - start >= 3 && kind >= 0) runs.push({ kind, cells: line.slice(start, i), horizontal });
       start = i;
     }
   };
   for (let r = 0; r < ROWS; r++) {
-    scan(Array.from({ length: COLS }, (_, c) => [r, c] as [number, number]));
+    scan(Array.from({ length: COLS }, (_, c) => [r, c] as [number, number]), true);
   }
   for (let c = 0; c < COLS; c++) {
-    scan(Array.from({ length: ROWS }, (_, r) => [r, c] as [number, number]));
+    scan(Array.from({ length: ROWS }, (_, r) => [r, c] as [number, number]), false);
   }
   return runs;
 }
