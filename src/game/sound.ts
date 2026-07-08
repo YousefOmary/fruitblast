@@ -5,8 +5,11 @@
  * dopamine ladder.
  */
 
+import { getStoredMuted, setStoredMuted } from './storage';
+
 let ctx: AudioContext | null = null;
-let muted = false;
+/** Mute state, seeded from persisted storage on module load so it survives reloads. */
+let muted = getStoredMuted();
 let noiseBuf: AudioBuffer | null = null;
 
 function audio(): AudioContext | null {
@@ -108,9 +111,20 @@ export function sfxWin(): void {
   [523, 659, 784, 1046].forEach((f, i) => tone(f, f, 0.16, 'triangle', 0.2, i * 0.09));
 }
 
-/** Toggle all sound; returns new muted state. */
+/** Set the mute flag and persist it. */
+export function setMuted(value: boolean): void {
+  muted = value;
+  setStoredMuted(value);
+}
+
+/** Current mute flag. */
+export function getMuted(): boolean {
+  return muted;
+}
+
+/** Toggle all sound and persist; returns the new muted state. */
 export function toggleMute(): boolean {
-  muted = !muted;
+  setMuted(!muted);
   return muted;
 }
 

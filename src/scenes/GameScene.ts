@@ -20,6 +20,9 @@ import { createGrid, findRuns, swapMakesRun, hasAnyMove, adjacent, type Grid, ty
 import {
   sfxSelect, sfxSwap, sfxInvalid, sfxMatch, sfxSpecialCreate, sfxRocket, sfxBomb,
 } from '../game/sound';
+import { getBest, setBest } from '../game/storage';
+import { makeButton } from '../ui/Button';
+import { COLORS } from '../ui/theme';
 
 type Tile = Phaser.GameObjects.Container;
 /** A board coordinate. */
@@ -44,6 +47,7 @@ export class GameScene extends Phaser.Scene {
   private busy = true;
   private score = 0;
   private shown = 0;
+  private best = 0;
   private scoreText!: Phaser.GameObjects.Text;
   private comboText!: Phaser.GameObjects.Text;
   private ring!: Phaser.GameObjects.Graphics;
@@ -53,8 +57,18 @@ export class GameScene extends Phaser.Scene {
   }
 
   create(): void {
+    // Phaser reuses one scene instance across restarts, so field initialisers
+    // only run once — reset ALL mutable state here so every boot (and Restart)
+    // starts truly fresh: no stale busy=true, no leftover selection or score.
+    this.selected = null;
+    this.busy = true;
+    this.score = 0;
+    this.shown = 0;
+    this.best = getBest();
+
     this.buildBackground();
     this.buildHud();
+    this.buildTopBar();
     this.makeSparkTexture();
 
     this.ring = this.add.graphics().setDepth(5).setVisible(false);
@@ -67,7 +81,17 @@ export class GameScene extends Phaser.Scene {
     this.specials = Array.from({ length: ROWS }, () => Array<Special>(COLS).fill('none'));
     this.spawnInitialTiles();
 
+    // Scene-scoped input: Phaser clears these listeners on shutdown, so a
+    // Menu→Game→Menu→Game loop never double-binds (no ghost/duplicate taps).
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.onPointer(p.x, p.y));
+  }
+
+  /** Top bar: a Pause button that freezes the board and raises the pause overlay. */
+  private buildTopBar(): void {
+    makeButton(this, GAME_W - 70, 60, '⏸', () => {
+      this.scene.launch('pause');
+      this.scene.pause();
+    }, { width: 84, height: 84, fontSize: 40, bg: COLORS.secondary, radius: 22 });
   }
 
   // ---------- scenery ----------
@@ -96,6 +120,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private makeSparkTexture(): void {
+    if (this.textures.exists('spark')) return; // persists across restarts
     const g = this.add.graphics();
     g.fillStyle(0xffffff, 1);
     g.fillCircle(9, 9, 9);
@@ -513,6 +538,11 @@ export class GameScene extends Phaser.Scene {
   // ---------- score & combo ----------
   private addScore(points: number): void {
     this.score += points;
+    // Persist a new personal best the moment it's beaten (survives reloads).
+    if (this.score > this.best) {
+      this.best = this.score;
+      setBest(this.best);
+    }
     this.tweens.addCounter({
       from: this.shown, to: this.score, duration: 300,
       onUpdate: (t) => { this.shown = Math.floor(t.getValue() ?? 0); this.scoreText.setText(String(this.shown)); },
