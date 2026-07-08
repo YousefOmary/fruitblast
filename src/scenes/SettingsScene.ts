@@ -1,7 +1,6 @@
 /**
  * Settings overlay, launched from the menu. Sound toggle is functional now;
- * Music toggle only persists the preference (actual playback lands in Phase 5 —
- * see TODO). Both settings survive a page reload via game/storage.
+ * Music and sound toggles apply immediately and survive reloads via storage.
  */
 
 import Phaser from 'phaser';
@@ -9,7 +8,8 @@ import { GAME_W, GAME_H } from '../game/config';
 import { COLORS } from '../ui/theme';
 import { makeButton } from '../ui/Button';
 import { getMuted, setMuted } from '../game/sound';
-import { getMusic, setMusic } from '../game/storage';
+import { getMusic } from '../game/storage';
+import { setMusicEnabled } from '../game/music';
 
 export class SettingsScene extends Phaser.Scene {
   constructor() {
@@ -36,9 +36,8 @@ export class SettingsScene extends Phaser.Scene {
       sound.setLabel(this.soundLabel());
     }, { width: 420, height: 92, fontSize: 36 });
 
-    // TODO(Phase 5): start/stop the background music track when this flips.
     const music = makeButton(this, px, py + 50, this.musicLabel(), () => {
-      setMusic(!getMusic());
+      setMusicEnabled(!getMusic());
       music.setLabel(this.musicLabel());
     }, { width: 420, height: 92, fontSize: 36 });
 

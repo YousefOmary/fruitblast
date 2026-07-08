@@ -10,6 +10,7 @@ import { GAME_W, GAME_H } from '../game/config';
 import { COLORS } from '../ui/theme';
 import { makeButton } from '../ui/Button';
 import { getMuted, setMuted } from '../game/sound';
+import { afterFadeOut } from '../ui/transitions';
 
 export class PauseScene extends Phaser.Scene {
   /** The level currently being played, so Restart reboots the same one. */
@@ -46,15 +47,19 @@ export class PauseScene extends Phaser.Scene {
     makeButton(this, px, py - 30, '↻  Restart', () => {
       // Full reset: stop the paused game and boot the SAME level fresh
       // (create() re-inits all state: moves, goal progress, board).
-      this.scene.stop('game');
-      this.scene.start('game', { level: this.level });
-      this.scene.stop();
+      afterFadeOut(this, () => {
+        this.scene.stop('game');
+        this.scene.start('game', { level: this.level });
+        this.scene.stop();
+      });
     }, { width: 380, height: 88 });
 
     makeButton(this, px, py + 80, '⌂  Home', () => {
-      this.scene.stop('game');
-      this.scene.start('menu');
-      this.scene.stop();
+      afterFadeOut(this, () => {
+        this.scene.stop('game');
+        this.scene.start('menu');
+        this.scene.stop();
+      });
     }, { width: 380, height: 88 });
 
     const sound = makeButton(this, px, py + ph / 2 - 80, this.soundLabel(), () => {

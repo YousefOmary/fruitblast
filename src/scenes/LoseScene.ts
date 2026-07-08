@@ -10,6 +10,7 @@ import Phaser from 'phaser';
 import { GAME_W, GAME_H } from '../game/config';
 import { COLORS } from '../ui/theme';
 import { makeButton } from '../ui/Button';
+import { afterFadeOut, fadeIn } from '../ui/transitions';
 
 /** Payload from GameScene: which level, and the goal-progress readout at defeat. */
 interface LoseData {
@@ -34,6 +35,7 @@ export class LoseScene extends Phaser.Scene {
   }
 
   create(): void {
+    fadeIn(this);
     this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.68).setInteractive();
 
     const pw = 560, ph = 620, px = GAME_W / 2, py = GAME_H / 2;
@@ -56,15 +58,19 @@ export class LoseScene extends Phaser.Scene {
 
     makeButton(this, px, py + ph / 2 - 150, '↻  Retry', () => {
       // Fresh restart of the same level — GameScene.create() re-inits all state.
-      this.scene.stop('game');
-      this.scene.start('game', { level: this.level });
-      this.scene.stop();
+      afterFadeOut(this, () => {
+        this.scene.stop('game');
+        this.scene.start('game', { level: this.level });
+        this.scene.stop();
+      });
     }, { width: 360, height: 96, fontSize: 42, bg: COLORS.primary });
 
     makeButton(this, px, py + ph / 2 - 50, '⌂  Home', () => {
-      this.scene.stop('game');
-      this.scene.start('menu');
-      this.scene.stop();
+      afterFadeOut(this, () => {
+        this.scene.stop('game');
+        this.scene.start('menu');
+        this.scene.stop();
+      });
     }, { width: 360, height: 84 });
   }
 }

@@ -12,6 +12,32 @@ export const BOARD_H = ROWS * TILE;
 export const BOARD_X = (GAME_W - BOARD_W) / 2;
 export const BOARD_Y = 360;
 
+/** Minimum drag distance that distinguishes a swipe from a slightly wobbly tap. */
+export const SWIPE_THRESHOLD = TILE * 0.35;
+
+/**
+ * Resolve a board drag to exactly one orthogonal neighbour.
+ *
+ * Short drags remain taps, the dominant axis wins for diagonal drags, and a
+ * swipe that points beyond the board returns null.
+ */
+export function swipeTarget(
+  fromR: number,
+  fromC: number,
+  dx: number,
+  dy: number,
+): { r: number; c: number } | null {
+  if (Math.hypot(dx, dy) < SWIPE_THRESHOLD) return null;
+
+  const target = Math.abs(dx) >= Math.abs(dy)
+    ? { r: fromR, c: fromC + Math.sign(dx) }
+    : { r: fromR + Math.sign(dy), c: fromC };
+
+  return target.r >= 0 && target.r < ROWS && target.c >= 0 && target.c < COLS
+    ? target
+    : null;
+}
+
 /** One matchable kind: a vibrant gem colour plus a fruit glyph. */
 export interface TileKind {
   color: number;

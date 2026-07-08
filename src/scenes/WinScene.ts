@@ -14,6 +14,7 @@ import { COLORS } from '../ui/theme';
 import { makeButton } from '../ui/Button';
 import { LEVEL_COUNT } from '../game/levels';
 import { sfxWin } from '../game/sound';
+import { afterFadeOut, fadeIn } from '../ui/transitions';
 
 /** Payload from GameScene describing the level just cleared. */
 interface WinData {
@@ -41,6 +42,7 @@ export class WinScene extends Phaser.Scene {
 
   create(): void {
     const isLast = this.level >= LEVEL_COUNT - 1;
+    fadeIn(this);
 
     // Dimmer swallows taps so the frozen board can't be poked.
     this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.68).setInteractive();
@@ -83,9 +85,11 @@ export class WinScene extends Phaser.Scene {
         { width: 360, height: 92, fontSize: 38, bg: COLORS.primary });
     } else {
       makeButton(this, px, py + ph / 2 - 150, '▶  Next', () => {
-        this.scene.stop('game');
-        this.scene.start('game', { level: this.level + 1 });
-        this.scene.stop();
+        afterFadeOut(this, () => {
+          this.scene.stop('game');
+          this.scene.start('game', { level: this.level + 1 });
+          this.scene.stop();
+        });
       }, { width: 360, height: 96, fontSize: 42, bg: COLORS.primary });
 
       makeButton(this, px, py + ph / 2 - 50, '⌂  Home', () => this.goHome(),
@@ -98,9 +102,11 @@ export class WinScene extends Phaser.Scene {
   }
 
   private goHome(): void {
-    this.scene.stop('game');
-    this.scene.start('menu');
-    this.scene.stop();
+    afterFadeOut(this, () => {
+      this.scene.stop('game');
+      this.scene.start('menu');
+      this.scene.stop();
+    });
   }
 
   /** Three star sockets centred on (cx, cy); earned ones pop in on a stagger. */

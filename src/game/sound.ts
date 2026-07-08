@@ -6,6 +6,7 @@
  */
 
 import { getStoredMuted, setStoredMuted } from './storage';
+import { startMusic, stopMusic } from './music';
 
 let ctx: AudioContext | null = null;
 /** Mute state, seeded from persisted storage on module load so it survives reloads. */
@@ -115,6 +116,8 @@ export function sfxWin(): void {
 export function setMuted(value: boolean): void {
   muted = value;
   setStoredMuted(value);
+  if (value) stopMusic();
+  else startMusic();
 }
 
 /** Current mute flag. */

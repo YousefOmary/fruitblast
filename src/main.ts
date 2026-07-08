@@ -7,8 +7,9 @@ import { PauseScene } from './scenes/PauseScene';
 import { SettingsScene } from './scenes/SettingsScene';
 import { WinScene } from './scenes/WinScene';
 import { LoseScene } from './scenes/LoseScene';
+import { startMusic } from './game/music';
 
-new Phaser.Game({
+const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: 'game',
   backgroundColor: '#140a24',
@@ -21,3 +22,13 @@ new Phaser.Game({
   // MenuScene boots first; the rest are started/launched on demand.
   scene: [MenuScene, GameScene, PauseScene, SettingsScene, WinScene, LoseScene],
 });
+
+// Music may only begin inside a user gesture. Calling this on every primary
+// pointerdown is safe: startMusic() is idempotent and checks both preferences.
+document.getElementById('game')?.addEventListener('pointerdown', startMusic);
+
+// Keep board drags inside the canvas on mobile: no page scroll, refresh or
+// browser gesture should steal the touch sequence from Phaser.
+const preventNativeGesture = (event: TouchEvent): void => event.preventDefault();
+game.canvas.addEventListener('touchstart', preventNativeGesture, { passive: false });
+game.canvas.addEventListener('touchmove', preventNativeGesture, { passive: false });

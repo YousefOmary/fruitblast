@@ -14,7 +14,8 @@
 import Phaser from 'phaser';
 import {
   BOARD_X, BOARD_Y, BOARD_W, BOARD_H, COLS, ROWS, TILE, KINDS, TILE_POINTS,
-  SPECIAL_CREATE_POINTS, SPECIAL_DETONATE_POINTS, GAME_W, cellCenter, type Special,
+  SPECIAL_CREATE_POINTS, SPECIAL_DETONATE_POINTS, GAME_W, SWIPE_THRESHOLD,
+  cellCenter, swipeTarget, type Special,
 } from '../game/config';
 import { createGrid, findRuns, swapMakesRun, hasAnyMove, adjacent, type Grid, type Run } from '../game/matchLogic';
 import {
@@ -24,10 +25,13 @@ import { getBest, setBest, getUnlocked, setUnlocked, setStars } from '../game/st
 import { getLevel, starsFor, goalLabel, LEVEL_COUNT, type Level } from '../game/levels';
 import { makeButton } from '../ui/Button';
 import { COLORS } from '../ui/theme';
+import { fadeIn } from '../ui/transitions';
 
 type Tile = Phaser.GameObjects.Container;
 /** A board coordinate. */
 interface Cell { r: number; c: number }
+/** One primary-pointer gesture captured on the board. */
+interface DownGesture extends Cell { x: number; y: number; pointerId: number }
 /** One special firing, recorded during detonation so we can play its VFX. */
 interface Detonation { type: Special; r: number; c: number; color: number }
 /** Optional inputs for one resolve pass (only honoured on the first cascade step). */
@@ -52,6 +56,7 @@ export class GameScene extends Phaser.Scene {
   private scoreText!: Phaser.GameObjects.Text;
   private comboText!: Phaser.GameObjects.Text;
   private ring!: Phaser.GameObjects.Graphics;
+  private downGesture: DownGesture | null = null;
 
   // ---- Phase 4: level / goal / moves state ----
   /** Index of the level being played (0-based). Set in init(). */
@@ -88,6 +93,7 @@ export class GameScene extends Phaser.Scene {
     // only run once — reset ALL mutable state here so every boot (and Restart)
     // starts truly fresh: no stale busy=true, no leftover selection or score.
     this.selected = null;
+    this.downGesture = null;
     this.busy = true;
     this.score = 0;
     this.shown = 0;
@@ -100,6 +106,7 @@ export class GameScene extends Phaser.Scene {
     this.ended = false;
 
     this.buildBackground();
+    fadeIn(this);
     this.buildHud();
     this.buildTopBar();
     this.makeSparkTexture();
@@ -120,7 +127,8 @@ export class GameScene extends Phaser.Scene {
 
     // Scene-scoped input: Phaser clears these listeners on shutdown, so a
     // Menu→Game→Menu→Game loop never double-binds (no ghost/duplicate taps).
-    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.onPointer(p.x, p.y));
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.onPointerDown(p));
+    this.input.on('pointerup', (p: Phaser.Input.Pointer) => this.onPointerUp(p));
   }
 
   /** Top bar: a Pause button that freezes the board and raises the pause overlay. */
@@ -296,10 +304,45 @@ export class GameScene extends Phaser.Scene {
     return r >= 0 && r < ROWS && c >= 0 && c < COLS ? { r, c } : null;
   }
 
-  private onPointer(x: number, y: number): void {
-    if (this.busy || this.ended) return;
-    const cell = this.cellAt(x, y);
+  private isPrimaryPointer(pointer: Phaser.Input.Pointer): boolean {
+    const native = pointer.event as PointerEvent | undefined;
+    return typeof native?.isPrimary !== 'boolean' || native.isPrimary;
+  }
+
+  private onPointerDown(pointer: Phaser.Input.Pointer): void {
+    if (this.busy || this.ended || !this.isPrimaryPointer(pointer) || this.downGesture) return;
+    const cell = this.cellAt(pointer.x, pointer.y);
     if (!cell) return;
+    this.downGesture = { ...cell, x: pointer.x, y: pointer.y, pointerId: pointer.id };
+  }
+
+  private onPointerUp(pointer: Phaser.Input.Pointer): void {
+    if (!this.isPrimaryPointer(pointer)) return;
+    const down = this.downGesture;
+    if (!down || pointer.id !== down.pointerId) return;
+    this.downGesture = null;
+    if (this.busy || this.ended) return;
+
+    const dx = pointer.x - down.x;
+    const dy = pointer.y - down.y;
+    const target = swipeTarget(down.r, down.c, dx, dy);
+    if (target) {
+      this.deselect();
+      void this.attemptSwap(down, target);
+      return;
+    }
+
+    // A long drag with no target was a swipe toward a board edge, not a tap.
+    if (Math.hypot(dx, dy) >= SWIPE_THRESHOLD) {
+      this.deselect();
+      return;
+    }
+
+    this.handleTap({ r: down.r, c: down.c });
+  }
+
+  /** Preserve the original select-then-select input alongside swipe gestures. */
+  private handleTap(cell: Cell): void {
     if (!this.selected) { this.select(cell); sfxSelect(); return; }
     if (this.selected.r === cell.r && this.selected.c === cell.c) { this.deselect(); return; }
     if (adjacent(this.selected.r, this.selected.c, cell.r, cell.c)) {

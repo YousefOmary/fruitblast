@@ -10,6 +10,7 @@ import { COLORS, paintBackground } from '../ui/theme';
 import { makeButton } from '../ui/Button';
 import { getBest, getUnlocked } from '../game/storage';
 import { LEVEL_COUNT } from '../game/levels';
+import { fadeIn, startSceneWithFade } from '../ui/transitions';
 
 export class MenuScene extends Phaser.Scene {
   /** The How-to-play panel while open, so we can toggle it off. */
@@ -22,6 +23,7 @@ export class MenuScene extends Phaser.Scene {
   create(): void {
     this.howto = null;
     paintBackground(this);
+    fadeIn(this);
 
     // Decorative fruit row up top for a splash of juice.
     this.add.text(GAME_W / 2, 150, '🍓 🍊 🍋 🥝 🫐 🍇', { fontSize: '46px' })
@@ -48,7 +50,8 @@ export class MenuScene extends Phaser.Scene {
       fontFamily: 'system-ui', fontSize: '28px', fontStyle: '700', color: '#b9a7e6',
     }).setOrigin(0.5);
 
-    makeButton(this, GAME_W / 2, 700, `▶  PLAY  (Lvl ${startLevel + 1})`, () => this.scene.start('game', { level: startLevel }),
+    makeButton(this, GAME_W / 2, 700, `▶  PLAY  (Lvl ${startLevel + 1})`,
+      () => startSceneWithFade(this, 'game', { level: startLevel }),
       { width: 400, height: 116, fontSize: 44, bg: COLORS.primary, radius: 28 });
 
     makeButton(this, GAME_W / 2, 870, '⚙  Settings', () => this.scene.launch('settings'),
