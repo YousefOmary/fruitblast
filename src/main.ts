@@ -13,6 +13,10 @@ const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: 'game',
   backgroundColor: '#140a24',
+  // Prefer the discrete GPU and round to whole pixels — steadier frame pacing
+  // on phones; target 60fps.
+  render: { powerPreference: 'high-performance', roundPixels: true },
+  fps: { target: 60, forceSetTimeOut: false },
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,

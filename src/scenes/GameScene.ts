@@ -56,6 +56,9 @@ export class GameScene extends Phaser.Scene {
   private scoreText!: Phaser.GameObjects.Text;
   private comboText!: Phaser.GameObjects.Text;
   private ring!: Phaser.GameObjects.Graphics;
+  /** One reused particle emitter per gem colour — pooled so a big cascade never
+   * allocates/destroys dozens of emitters in a frame (the main source of jank). */
+  private emitters!: Map<number, Phaser.GameObjects.Particles.ParticleEmitter>;
   private downGesture: DownGesture | null = null;
 
   // ---- Phase 4: level / goal / moves state ----
@@ -110,6 +113,7 @@ export class GameScene extends Phaser.Scene {
     this.buildHud();
     this.buildTopBar();
     this.makeSparkTexture();
+    this.buildEmitters();
 
     // Seed the HUD with this level's number, goal and move budget.
     this.levelText.setText(`LEVEL ${this.levelIndex + 1}`);
@@ -612,13 +616,21 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  /** Build one reusable emitter per gem colour (called once per scene start). */
+  private buildEmitters(): void {
+    this.emitters = new Map();
+    for (const kind of KINDS) {
+      const e = this.add.particles(0, 0, 'spark', {
+        speed: { min: 60, max: 240 }, lifespan: 360, scale: { start: 0.85, end: 0 },
+        quantity: 1, emitting: false, tint: kind.color, blendMode: 'ADD',
+      }).setDepth(15);
+      this.emitters.set(kind.color, e);
+    }
+  }
+
   private burst(x: number, y: number, color: number): void {
-    const e = this.add.particles(0, 0, 'spark', {
-      speed: { min: 70, max: 260 }, lifespan: 460, scale: { start: 1, end: 0 },
-      quantity: 1, emitting: false, tint: color, blendMode: 'ADD',
-    }).setDepth(15);
-    e.explode(14, x, y);
-    this.time.delayedCall(500, () => e.destroy());
+    // Reuse the pooled emitter for this colour — no per-tile allocation.
+    this.emitters.get(color)?.explode(10, x, y);
   }
 
   /** A bright beam sweeping a full row (horizontal) or column, then fading. */

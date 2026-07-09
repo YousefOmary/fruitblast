@@ -60,11 +60,19 @@ export function makeButton(
 
   c.on('pointerover', () => scene.tweens.add({ targets: c, scale: 1.05, duration: 120, ease: 'Quad.easeOut' }));
   c.on('pointerout', () => scene.tweens.add({ targets: c, scale: 1, duration: 120, ease: 'Quad.easeOut' }));
-  c.on('pointerdown', () => scene.tweens.add({ targets: c, scale: 0.94, duration: 80, ease: 'Quad.easeOut' }));
-  c.on('pointerup', () => {
-    scene.tweens.add({ targets: c, scale: 1.05, duration: 120, ease: 'Back.easeOut' });
+  // Fire on pointerDOWN for instant touch response (pointerup feels laggy on
+  // mobile). A guard stops an accidental double-fire within the same tap.
+  let firing = false;
+  c.on('pointerdown', () => {
+    if (firing) return;
+    firing = true;
+    scene.tweens.add({
+      targets: c, scale: 0.94, duration: 70, ease: 'Quad.easeOut',
+      yoyo: true, onComplete: () => scene.tweens.add({ targets: c, scale: 1, duration: 90 }),
+    });
     sfxSelect();
     onClick();
+    scene.time.delayedCall(220, () => { firing = false; });
   });
 
   const btn = c as Button;
