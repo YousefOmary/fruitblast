@@ -27,7 +27,7 @@ import { makeButton } from '../ui/Button';
 import { COLORS } from '../ui/theme';
 import { fadeIn } from '../ui/transitions';
 
-type Tile = Phaser.GameObjects.Container;
+type Tile = Phaser.GameObjects.Image;
 /** A board coordinate. */
 interface Cell { r: number; c: number }
 /** One primary-pointer gesture captured on the board. */
@@ -60,6 +60,8 @@ export class GameScene extends Phaser.Scene {
    * allocates/destroys dozens of emitters in a frame (the main source of jank). */
   private emitters!: Map<number, Phaser.GameObjects.Particles.ParticleEmitter>;
   private downGesture: DownGesture | null = null;
+  /** Inactive tile Images ready to be reused by the next refill. */
+  private tilePool: Tile[] = [];
 
   // ---- Phase 4: level / goal / moves state ----
   /** Index of the level being played (0-based). Set in init(). */
@@ -101,6 +103,7 @@ export class GameScene extends Phaser.Scene {
     this.score = 0;
     this.shown = 0;
     this.best = getBest();
+    this.tilePool = [];
 
     // Fresh level state for this boot (Retry / Next / Restart all land here).
     this.level = getLevel(this.levelIndex);
@@ -113,6 +116,7 @@ export class GameScene extends Phaser.Scene {
     this.buildHud();
     this.buildTopBar();
     this.makeSparkTexture();
+    this.makeTileAtlas();
     this.buildEmitters();
 
     // Seed the HUD with this level's number, goal and move budget.
@@ -215,57 +219,155 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ---------- tiles ----------
-  /**
-   * Build a tile container. `special` decorates it: line tiles get a bright
-   * stripe + ↔/↕, the bomb gets a dark gem with a colour core + ✦ and a pulsing
-   * glow so the colour it will clear stays readable.
-   */
-  private makeTile(r: number, c: number, kind: number, startY: number, special: Special = 'none'): Tile {
-    const { x } = cellCenter(r, c);
-    const { color, glyph } = KINDS[kind];
-    const children: Phaser.GameObjects.GameObject[] = [];
+  /** Build the 24 normal/special tile variants once into one shared atlas. */
+  private makeTileAtlas(): void {
+    const textureKey = 'tile-atlas';
+    if (this.textures.exists(textureKey)) return;
 
-    const gem = this.add.graphics();
-    if (special === 'bomb') {
-      gem.fillStyle(0x1b1030, 1);
-      gem.fillRoundedRect(-TILE / 2 + 5, -TILE / 2 + 5, TILE - 10, TILE - 10, 18);
-      gem.fillStyle(color, 0.92); // colour core: which colour this bomb clears
-      gem.fillCircle(0, 0, 17);
-      gem.lineStyle(4, color, 1);
-      gem.strokeRoundedRect(-TILE / 2 + 5, -TILE / 2 + 5, TILE - 10, TILE - 10, 18);
-    } else {
-      gem.fillStyle(color, 1);
-      gem.fillRoundedRect(-TILE / 2 + 5, -TILE / 2 + 5, TILE - 10, TILE - 10, 16);
-      gem.fillStyle(0xffffff, 0.22);
-      gem.fillRoundedRect(-TILE / 2 + 5, -TILE / 2 + 5, TILE - 10, (TILE - 10) / 2, 16);
+    const variants: Special[] = ['none', 'lineH', 'lineV', 'bomb'];
+    const canvas = document.createElement('canvas');
+    canvas.width = KINDS.length * TILE;
+    canvas.height = variants.length * TILE;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    for (let variantIndex = 0; variantIndex < variants.length; variantIndex++) {
+      const special = variants[variantIndex];
+      for (let kind = 0; kind < KINDS.length; kind++) {
+        ctx.save();
+        ctx.translate(kind * TILE, variantIndex * TILE);
+        this.paintTileFrame(ctx, kind, special);
+        ctx.restore();
+      }
     }
-    children.push(gem);
 
-    if (special === 'lineH' || special === 'lineV') {
-      const stripe = this.add.graphics();
-      stripe.fillStyle(0xffffff, 0.85);
-      if (special === 'lineH') stripe.fillRoundedRect(-TILE / 2 + 6, -6, TILE - 12, 12, 6);
-      else stripe.fillRoundedRect(-6, -TILE / 2 + 6, 12, TILE - 12, 6);
-      children.push(stripe);
-      children.push(this.add.text(0, special === 'lineH' ? -20 : 22,
-        special === 'lineH' ? '↔' : '↕',
-        { fontSize: '24px', fontStyle: '800', color: '#ffffff' }).setOrigin(0.5));
-      children.push(this.add.text(0, special === 'lineH' ? 18 : -20, glyph, { fontSize: '28px' }).setOrigin(0.5));
-    } else if (special === 'bomb') {
-      children.push(this.add.text(0, 0, '✦', { fontSize: '40px', fontStyle: '800', color: '#ffffff' }).setOrigin(0.5));
+    const texture = this.textures.addCanvas(textureKey, canvas);
+    if (!texture) return;
+    for (let variantIndex = 0; variantIndex < variants.length; variantIndex++) {
+      for (let kind = 0; kind < KINDS.length; kind++) {
+        texture.add(
+          this.tileFrame(kind, variants[variantIndex]),
+          0,
+          kind * TILE,
+          variantIndex * TILE,
+          TILE,
+          TILE,
+        );
+      }
+    }
+    texture.refresh();
+  }
+
+  /** Paint one tile-atlas frame without creating Phaser Graphics or Text objects. */
+  private paintTileFrame(ctx: CanvasRenderingContext2D, kind: number, special: Special): void {
+    const { color, glyph } = KINDS[kind];
+    const inset = 5;
+    const size = TILE - inset * 2;
+    const center = TILE / 2;
+    const colorCss = `#${color.toString(16).padStart(6, '0')}`;
+
+    if (special === 'bomb') {
+      this.roundedRect(ctx, inset, inset, size, size, 18);
+      ctx.fillStyle = '#1b1030';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(center, center, 17, 0, Math.PI * 2);
+      ctx.fillStyle = colorCss;
+      ctx.globalAlpha = 0.92;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      this.roundedRect(ctx, inset, inset, size, size, 18);
+      ctx.strokeStyle = colorCss;
+      ctx.lineWidth = 4;
+      ctx.stroke();
     } else {
-      children.push(this.add.text(0, 2, glyph, { fontSize: '40px' }).setOrigin(0.5));
+      this.roundedRect(ctx, inset, inset, size, size, 16);
+      ctx.fillStyle = colorCss;
+      ctx.fill();
+      ctx.save();
+      this.roundedRect(ctx, inset, inset, size, size, 16);
+      ctx.clip();
+      ctx.fillStyle = 'rgba(255,255,255,0.22)';
+      ctx.fillRect(inset, inset, size, size / 2);
+      ctx.restore();
+    }
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    if (special === 'lineH' || special === 'lineV') {
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      if (special === 'lineH') {
+        this.roundedRect(ctx, 6, center - 6, TILE - 12, 12, 6);
+      } else {
+        this.roundedRect(ctx, center - 6, 6, 12, TILE - 12, 6);
+      }
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '800 24px system-ui, sans-serif';
+      ctx.fillText(special === 'lineH' ? '↔' : '↕', center, special === 'lineH' ? center - 20 : center + 22);
+      ctx.font = '28px system-ui, sans-serif';
+      ctx.fillText(glyph, center, special === 'lineH' ? center + 18 : center - 20);
+    } else if (special === 'bomb') {
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '800 40px system-ui, sans-serif';
+      ctx.fillText('✦', center, center);
+    } else {
+      ctx.font = '40px system-ui, sans-serif';
+      ctx.fillText(glyph, center, center + 2);
     }
 
     if (special !== 'none') {
-      const glow = this.add.graphics();
-      glow.lineStyle(3, 0xffffff, 1);
-      glow.strokeRoundedRect(-TILE / 2 + 3, -TILE / 2 + 3, TILE - 6, TILE - 6, 18);
-      children.push(glow);
-      this.tweens.add({ targets: glow, alpha: { from: 0.9, to: 0.15 }, yoyo: true, repeat: -1, duration: 520 });
+      this.roundedRect(ctx, 3, 3, TILE - 6, TILE - 6, 18);
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 3;
+      ctx.stroke();
     }
+  }
 
-    const tile = this.add.container(x, startY, children);
+  /** Add a rounded rectangle to a Canvas 2D path. */
+  private roundedRect(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    radius: number,
+  ): void {
+    const r = Math.min(radius, width / 2, height / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + width - r, y);
+    ctx.arcTo(x + width, y, x + width, y + r, r);
+    ctx.lineTo(x + width, y + height - r);
+    ctx.arcTo(x + width, y + height, x + width - r, y + height, r);
+    ctx.lineTo(x + r, y + height);
+    ctx.arcTo(x, y + height, x, y + height - r, r);
+    ctx.lineTo(x, y + r);
+    ctx.arcTo(x, y, x + r, y, r);
+    ctx.closePath();
+  }
+
+  private tileFrame(kind: number, special: Special): string {
+    return `${special}-${kind}`;
+  }
+
+  /**
+   * Acquire one lightweight tile Image. Every visual variant is a frame in the
+   * shared atlas, and cleared Images return to the pool before collapse refills.
+   */
+  private makeTile(r: number, c: number, kind: number, startY: number, special: Special = 'none'): Tile {
+    const { x } = cellCenter(r, c);
+    let tile = this.tilePool.pop();
+    if (!tile) {
+      tile = this.add.image(x, startY, 'tile-atlas');
+    }
+    tile
+      .setActive(true)
+      .setVisible(true)
+      .setPosition(x, startY)
+      .setTexture('tile-atlas', this.tileFrame(kind, special))
+      .setScale(1)
+      .setAlpha(1);
     tile.setData('kind', kind);
     tile.setData('special', special);
     return tile;
@@ -295,10 +397,16 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  /** Kill any tweens on a tile and its children before destroying it (stops orphaned glow pulses). */
+  /** Stop motion/feedback tweens before reusing a tile Image. */
   private killTileTweens(tile: Tile): void {
     this.tweens.killTweensOf(tile);
-    for (const child of tile.getAll()) this.tweens.killTweensOf(child);
+  }
+
+  /** Return a cleared tile Image to the refill pool without destroying it. */
+  private releaseTile(tile: Tile): void {
+    this.killTileTweens(tile);
+    tile.setActive(false).setVisible(false);
+    this.tilePool.push(tile);
   }
 
   // ---------- input ----------
@@ -523,7 +631,7 @@ export class GameScene extends Phaser.Scene {
       for (const [key, { special, kind }] of newSpecials) {
         const [r, c] = key.split(',').map(Number);
         const old = this.tiles[r][c];
-        if (old) { this.killTileTweens(old); old.destroy(); }
+        if (old) this.releaseTile(old);
         const tile = this.makeTile(r, c, kind, cellCenter(r, c).y, special);
         tile.setScale(0.2);
         this.tweens.add({ targets: tile, scale: 1, duration: 260, ease: 'Back.easeOut' });
@@ -611,7 +719,7 @@ export class GameScene extends Phaser.Scene {
     return new Promise((res) => {
       this.tweens.add({
         targets: tile, scale: 1.4, alpha: 0, duration: 200, ease: 'Back.easeIn',
-        onComplete: () => { tile.destroy(); res(); },
+        onComplete: () => { this.releaseTile(tile); res(); },
       });
     });
   }
@@ -699,7 +807,7 @@ export class GameScene extends Phaser.Scene {
     this.grid = createGrid();
     for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
       const old = this.tiles[r][c];
-      if (old) { this.killTileTweens(old); old.destroy(); }
+      if (old) this.releaseTile(old);
       this.specials[r][c] = 'none';
       this.tiles[r][c] = this.makeTile(r, c, this.grid[r][c], cellCenter(r, c).y - BOARD_H - 100);
     }
