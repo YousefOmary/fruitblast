@@ -11,17 +11,20 @@ import { COLORS } from '../ui/theme';
 import { makeButton } from '../ui/Button';
 import { getMuted, setMuted } from '../game/sound';
 import { afterFadeOut } from '../ui/transitions';
+import type { GameMode } from '../game/modes';
 
 export class PauseScene extends Phaser.Scene {
   /** The level currently being played, so Restart reboots the same one. */
   private level = 0;
+  private mode: GameMode = 'campaign';
 
   constructor() {
     super('pause');
   }
 
-  init(data: { level?: number }): void {
+  init(data: { level?: number; mode?: GameMode }): void {
     this.level = typeof data?.level === 'number' ? data.level : 0;
+    this.mode = data?.mode ?? 'campaign';
   }
 
   create(): void {
@@ -49,7 +52,7 @@ export class PauseScene extends Phaser.Scene {
       // (create() re-inits all state: moves, goal progress, board).
       afterFadeOut(this, () => {
         this.scene.stop('game');
-        this.scene.start('game', { level: this.level });
+        this.scene.start('game', { level: this.level, mode: this.mode });
         this.scene.stop();
       });
     }, { width: 380, height: 88 });

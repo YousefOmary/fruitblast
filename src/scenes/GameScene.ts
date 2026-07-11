@@ -14,15 +14,22 @@
 import Phaser from 'phaser';
 import {
   BOARD_X, BOARD_Y, BOARD_W, BOARD_H, COLS, ROWS, TILE, KINDS, TILE_POINTS,
-  SPECIAL_CREATE_POINTS, SPECIAL_DETONATE_POINTS, GAME_W, SWIPE_THRESHOLD,
+  SPECIAL_CREATE_POINTS, SPECIAL_DETONATE_POINTS, GAME_W, SWIPE_THRESHOLD, ANIM,
   cellCenter, swipeTarget, type Special,
 } from '../game/config';
 import { createGrid, findRuns, swapMakesRun, hasAnyMove, adjacent, type Grid, type Run } from '../game/matchLogic';
 import {
   sfxSelect, sfxSwap, sfxInvalid, sfxMatch, sfxSpecialCreate, sfxRocket, sfxBomb,
 } from '../game/sound';
-import { getBest, setBest, getUnlocked, setUnlocked, setStars } from '../game/storage';
-import { getLevel, starsFor, goalLabel, LEVEL_COUNT, type Level } from '../game/levels';
+import {
+  getBest, setBest, getUnlocked, setUnlocked, setStars, setLastCampaign, setLastMode,
+  getModeBest, setModeBest, recordDailyResult,
+} from '../game/storage';
+import { getLevel, starsFor, goalLabel, type Level } from '../game/levels';
+import {
+  dailyDate, dailySeed, dailyShare, modeConfig, seededRandom,
+  type GameMode, type ModeConfig,
+} from '../game/modes';
 import { makeButton } from '../ui/Button';
 import { COLORS } from '../ui/theme';
 import { fadeIn } from '../ui/transitions';
@@ -43,6 +50,8 @@ interface ResolveOpts {
   /** Overrides the colour a specific bomb (by "r,c" key) clears — used for bomb+normal swaps. */
   bombColorFor?: Map<string, number>;
 }
+
+interface GameData { level?: number; mode?: GameMode }
 
 export class GameScene extends Phaser.Scene {
   private grid: Grid = [];
@@ -77,6 +86,13 @@ export class GameScene extends Phaser.Scene {
   private levelText!: Phaser.GameObjects.Text;
   private movesText!: Phaser.GameObjects.Text;
   private goalText!: Phaser.GameObjects.Text;
+  private mode: GameMode = 'campaign';
+  private modeRules: ModeConfig = modeConfig('campaign');
+  private random: () => number = Math.random;
+  private timerEvent: Phaser.Time.TimerEvent | null = null;
+  private timeLeft = 0;
+  private timeExpired = false;
+  private dailyKey = '';
 
   constructor() {
     super('game');
@@ -88,9 +104,11 @@ export class GameScene extends Phaser.Scene {
    * bare scene.start('game') — in which case we fall back to the furthest
    * unlocked level. The index is clamped so it can never fall out of range.
    */
-  init(data: { level?: number }): void {
+  init(data: GameData): void {
+    this.mode = data?.mode ?? 'campaign';
+    this.modeRules = modeConfig(this.mode);
     const requested = typeof data?.level === 'number' ? data.level : getUnlocked();
-    this.levelIndex = Math.max(0, Math.min(LEVEL_COUNT - 1, requested));
+    this.levelIndex = Math.max(0, Math.floor(requested));
   }
 
   create(): void {
@@ -104,12 +122,19 @@ export class GameScene extends Phaser.Scene {
     this.shown = 0;
     this.best = getBest();
     this.tilePool = [];
+    this.clearTimer();
 
     // Fresh level state for this boot (Retry / Next / Restart all land here).
     this.level = getLevel(this.levelIndex);
-    this.movesLeft = this.level.moves;
+    this.movesLeft = this.mode === 'campaign' ? this.level.moves : (this.modeRules.moves ?? 0);
     this.collected = 0;
     this.ended = false;
+    this.timeExpired = false;
+    this.timeLeft = this.modeRules.seconds ?? 0;
+    this.dailyKey = dailyDate();
+    this.random = this.mode === 'daily' ? seededRandom(dailySeed(this.dailyKey)) : Math.random;
+    if (this.mode === 'campaign') setLastCampaign(this.levelIndex);
+    setLastMode(this.mode);
 
     this.buildBackground();
     fadeIn(this);
@@ -120,15 +145,15 @@ export class GameScene extends Phaser.Scene {
     this.buildEmitters();
 
     // Seed the HUD with this level's number, goal and move budget.
-    this.levelText.setText(`LEVEL ${this.levelIndex + 1}`);
+    this.levelText.setText(this.mode === 'campaign' ? `LEVEL ${this.levelIndex + 1}` : this.modeRules.title);
     this.updateHud();
 
     this.ring = this.add.graphics().setDepth(5).setVisible(false);
     this.ring.lineStyle(5, 0xffffff, 0.95);
     this.ring.strokeRoundedRect(-TILE / 2, -TILE / 2, TILE, TILE, 16);
-    this.tweens.add({ targets: this.ring, scale: { from: 1, to: 1.08 }, yoyo: true, repeat: -1, duration: 420 });
+    this.tweens.add({ targets: this.ring, scale: { from: 1, to: 1.08 }, yoyo: true, repeat: -1, duration: ANIM.selectionPulse });
 
-    this.grid = createGrid();
+    this.grid = createGrid(this.random, this.activeColors());
     this.tiles = Array.from({ length: ROWS }, () => Array<Tile | null>(COLS).fill(null));
     this.specials = Array.from({ length: ROWS }, () => Array<Special>(COLS).fill('none'));
     this.spawnInitialTiles();
@@ -137,13 +162,18 @@ export class GameScene extends Phaser.Scene {
     // Menu→Game→Menu→Game loop never double-binds (no ghost/duplicate taps).
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.onPointerDown(p));
     this.input.on('pointerup', (p: Phaser.Input.Pointer) => this.onPointerUp(p));
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.clearTimer());
   }
 
   /** Top bar: a Pause button that freezes the board and raises the pause overlay. */
   private buildTopBar(): void {
+    if (this.mode === 'endless') {
+      makeButton(this, GAME_W - 70, 60, '⌂', () => this.quitToMenu(),
+        { width: 84, height: 84, fontSize: 40, bg: COLORS.secondary, radius: 22 });
+      return;
+    }
     makeButton(this, GAME_W - 70, 60, '⏸', () => {
-      // Hand the current level to Pause so its Restart restarts THIS level.
-      this.scene.launch('pause', { level: this.levelIndex });
+      this.scene.launch('pause', { level: this.levelIndex, mode: this.mode });
       this.scene.pause();
     }, { width: 84, height: 84, fontSize: 40, bg: COLORS.secondary, radius: 22 });
   }
@@ -172,7 +202,7 @@ export class GameScene extends Phaser.Scene {
       fontFamily: 'system-ui', fontSize: '58px', fontStyle: '800', color: '#ffd23f',
     }).setOrigin(0.5);
 
-    this.add.text(510, 126, 'MOVES', {
+    this.add.text(510, 126, this.modeRules.limit === 'time' ? 'TIME' : this.modeRules.limit === 'none' ? 'BEST' : 'MOVES', {
       fontFamily: 'system-ui', fontSize: '24px', fontStyle: '700', color: '#b9a7e6',
     }).setOrigin(0.5);
     this.movesText = this.add.text(510, 180, '0', {
@@ -191,8 +221,26 @@ export class GameScene extends Phaser.Scene {
 
   /** Refresh the live HUD readouts: moves (turns red when low) and goal progress. */
   private updateHud(): void {
+    if (this.modeRules.limit === 'time') {
+      this.movesText.setText(`${Math.max(0, this.timeLeft)}s`);
+      this.movesText.setColor(this.timeLeft <= 10 ? '#ff5b6b' : '#ffffff');
+      this.goalText.setText('Score as much as you can!');
+      return;
+    }
+    if (this.modeRules.limit === 'none') {
+      this.movesText.setText(String(getModeBest('endless')));
+      this.movesText.setColor('#ffffff');
+      this.goalText.setText('Relax • no limits • tap ⌂ to quit');
+      return;
+    }
+
     this.movesText.setText(String(Math.max(0, this.movesLeft)));
     this.movesText.setColor(this.movesLeft <= 3 ? '#ff5b6b' : '#ffffff');
+
+    if (this.mode === 'daily') {
+      this.goalText.setText(`${this.dailyKey}  •  Make every move count`);
+      return;
+    }
 
     const g = this.level.goal;
     if (g.type === 'score') {
@@ -205,6 +253,7 @@ export class GameScene extends Phaser.Scene {
 
   /** True once the active level's goal is satisfied. */
   private goalMet(): boolean {
+    if (this.mode !== 'campaign') return false;
     const g = this.level.goal;
     return g.type === 'score' ? this.score >= g.target : this.collected >= g.count;
   }
@@ -380,20 +429,23 @@ export class GameScene extends Phaser.Scene {
         const startY = cellCenter(r, c).y - BOARD_H - 120;
         const tile = this.makeTile(r, c, this.grid[r][c], startY);
         this.tiles[r][c] = tile;
-        proms.push(this.moveTile(tile, cellCenter(r, c).y, 60 + r * 45, 'Bounce.easeOut'));
+        proms.push(this.moveTile(tile, cellCenter(r, c).y, 45 + r * 32, ANIM.fallEase, ANIM.initialFall));
       }
     }
-    Promise.all(proms).then(() => { this.busy = false; });
+    Promise.all(proms).then(() => {
+      this.busy = false;
+      if (this.mode === 'time') this.startTimer();
+    });
   }
 
-  private moveTile(tile: Tile, y: number, delay = 0, ease = 'Cubic.easeIn'): Promise<void> {
+  private moveTile(tile: Tile, y: number, delay = 0, ease: string = ANIM.fallEase, duration: number = ANIM.fall): Promise<void> {
     return new Promise((res) => {
-      this.tweens.add({ targets: tile, y, duration: 320, delay, ease, onComplete: () => res() });
+      this.tweens.add({ targets: tile, y, duration, delay, ease, onComplete: () => res() });
     });
   }
   private slideTile(tile: Tile, x: number, y: number): Promise<void> {
     return new Promise((res) => {
-      this.tweens.add({ targets: tile, x, y, duration: 180, ease: 'Quad.easeInOut', onComplete: () => res() });
+      this.tweens.add({ targets: tile, x, y, duration: ANIM.swap, ease: ANIM.swapEase, onComplete: () => res() });
     });
   }
 
@@ -488,7 +540,7 @@ export class GameScene extends Phaser.Scene {
         sfxInvalid();
         await Promise.all([this.slideTile(ta, pb.x, pb.y), this.slideTile(tb, pa.x, pa.y)]);
         await Promise.all([this.slideTile(ta, pa.x, pa.y), this.slideTile(tb, pb.x, pb.y)]);
-        this.cameras.main.shake(120, 0.006);
+        this.cameras.main.shake(ANIM.invalidShake, 0.006);
         return;
       }
 
@@ -516,9 +568,9 @@ export class GameScene extends Phaser.Scene {
         }
       }
 
-      // A committed swap (normal or special-involving) spends exactly one move.
-      // Invalid swaps returned above, before this, so they never cost a move.
-      this.movesLeft--;
+      // Invalid swaps returned above never spend a move. Zen and Time Attack
+      // have no move budget; campaign and Daily spend exactly one.
+      if (this.modeRules.limit === 'moves') this.movesLeft--;
       this.updateHud();
 
       await this.resolve({ pivotHints: [a, b], forcedSeeds, bombColorFor });
@@ -530,11 +582,14 @@ export class GameScene extends Phaser.Scene {
       //   2) moves gone → loss
       //   3) otherwise, if the board has no legal swap, reshuffle (never a loss,
       //      never costs a move) and play on.
-      if (this.goalMet()) { this.win(); return; }
-      if (this.movesLeft <= 0) { this.lose(); return; }
+      if (this.mode === 'campaign' && this.goalMet()) { this.win(); return; }
+      if (this.mode === 'campaign' && this.movesLeft <= 0) { this.lose(); return; }
+      if (this.mode === 'daily' && this.movesLeft <= 0) { this.finishDaily(); return; }
+      if (this.mode === 'time' && this.timeExpired) { this.finishTimed(); return; }
       if (!hasAnyMove(this.grid)) await this.reshuffle();
     } finally {
       this.busy = false;
+      if (this.mode === 'time' && this.timeExpired) this.finishTimed();
     }
   }
 
@@ -543,9 +598,10 @@ export class GameScene extends Phaser.Scene {
     if (this.ended) return;
     this.ended = true;
     const stars = starsFor(this.level, this.score);
-    setUnlocked(this.levelIndex + 1); // open the next level (clamped by menu)
+    setUnlocked(this.levelIndex + 1);
     setStars(this.levelIndex, stars); // keep the best rating for this level
-    this.scene.launch('win', { level: this.levelIndex, score: this.score, stars });
+    setLastCampaign(this.levelIndex + 1);
+    this.scene.launch('win', { level: this.levelIndex, score: this.score, stars, mode: this.mode });
     this.scene.pause();
   }
 
@@ -618,7 +674,7 @@ export class GameScene extends Phaser.Scene {
       for (const key of toClear) {
         const [r, c] = key.split(',').map(Number);
         // Count toward a 'collect' goal by the tile's own kind, before it clears.
-        if (goal.type === 'collect' && this.grid[r][c] === goal.kind) this.collected++;
+        if (this.mode === 'campaign' && goal.type === 'collect' && this.grid[r][c] === goal.kind) this.collected++;
         const tile = this.tiles[r][c];
         if (tile) { this.burst(tile.x, tile.y, KINDS[this.grid[r][c]].color); pops.push(this.popTile(tile)); }
         this.tiles[r][c] = null;
@@ -634,7 +690,7 @@ export class GameScene extends Phaser.Scene {
         if (old) this.releaseTile(old);
         const tile = this.makeTile(r, c, kind, cellCenter(r, c).y, special);
         tile.setScale(0.2);
-        this.tweens.add({ targets: tile, scale: 1, duration: 260, ease: 'Back.easeOut' });
+        this.tweens.add({ targets: tile, scale: 1, duration: ANIM.specialForge, ease: 'Back.easeOut' });
         this.tiles[r][c] = tile;
         this.specials[r][c] = special;
         this.grid[r][c] = kind;
@@ -643,6 +699,7 @@ export class GameScene extends Phaser.Scene {
 
       await Promise.all(pops);
       await this.collapse();
+      if (step >= 0) await this.cascadeBeat();
     }
   }
 
@@ -718,7 +775,7 @@ export class GameScene extends Phaser.Scene {
     this.killTileTweens(tile);
     return new Promise((res) => {
       this.tweens.add({
-        targets: tile, scale: 1.4, alpha: 0, duration: 200, ease: 'Back.easeIn',
+        targets: tile, scale: 1.28, alpha: 0, duration: ANIM.pop, ease: ANIM.popEase,
         onComplete: () => { this.releaseTile(tile); res(); },
       });
     });
@@ -753,7 +810,7 @@ export class GameScene extends Phaser.Scene {
       const x = cellCenter(0, c).x;
       g.fillRoundedRect(x - thick / 2, BOARD_Y, thick, BOARD_H, thick / 2);
     }
-    this.tweens.add({ targets: g, alpha: 0, duration: 340, ease: 'Cubic.easeOut', onComplete: () => g.destroy() });
+    this.tweens.add({ targets: g, alpha: 0, duration: ANIM.beam, ease: 'Cubic.easeOut', onComplete: () => g.destroy() });
     // Coloured spark trail along the line.
     const line = horizontal
       ? Array.from({ length: COLS }, (_, i) => cellCenter(r, i))
@@ -766,11 +823,11 @@ export class GameScene extends Phaser.Scene {
     const flash = this.add.graphics().setPosition(x, y).setDepth(16).setBlendMode(Phaser.BlendModes.ADD);
     flash.fillStyle(0xffffff, 0.9);
     flash.fillCircle(0, 0, TILE * 0.6);
-    this.tweens.add({ targets: flash, scale: 3.2, alpha: 0, duration: 420, ease: 'Cubic.easeOut', onComplete: () => flash.destroy() });
+    this.tweens.add({ targets: flash, scale: 3.2, alpha: 0, duration: ANIM.bombFlash, ease: 'Cubic.easeOut', onComplete: () => flash.destroy() });
     const ring = this.add.graphics().setPosition(x, y).setDepth(16).setBlendMode(Phaser.BlendModes.ADD);
     ring.lineStyle(6, color, 0.9);
     ring.strokeCircle(0, 0, TILE * 0.6);
-    this.tweens.add({ targets: ring, scale: 4, alpha: 0, duration: 480, ease: 'Cubic.easeOut', onComplete: () => ring.destroy() });
+    this.tweens.add({ targets: ring, scale: 4, alpha: 0, duration: ANIM.bombRing, ease: 'Cubic.easeOut', onComplete: () => ring.destroy() });
   }
 
   /** Drop surviving tiles into gaps and spawn new ones from above. */
@@ -785,18 +842,18 @@ export class GameScene extends Phaser.Scene {
           this.grid[write][c] = this.grid[r][c]; this.grid[r][c] = -1;
           this.specials[write][c] = this.specials[r][c]; this.specials[r][c] = 'none';
           const tile = this.tiles[r][c]!; this.tiles[write][c] = tile; this.tiles[r][c] = null;
-          proms.push(this.moveTile(tile, cellCenter(write, c).y, 0, 'Bounce.easeOut'));
+          proms.push(this.moveTile(tile, cellCenter(write, c).y));
         }
         write--;
       }
       for (let r = write; r >= 0; r--) {
-        const kind = Math.floor(Math.random() * KINDS.length);
+        const kind = Math.floor(this.random() * this.activeColors());
         this.grid[r][c] = kind;
         this.specials[r][c] = 'none';
         const startY = cellCenter(0, c).y - (write - r + 1) * TILE - 40;
         const tile = this.makeTile(r, c, kind, startY);
         this.tiles[r][c] = tile;
-        proms.push(this.moveTile(tile, cellCenter(r, c).y, 0, 'Bounce.easeOut'));
+        proms.push(this.moveTile(tile, cellCenter(r, c).y));
       }
     }
     await Promise.all(proms);
@@ -804,7 +861,7 @@ export class GameScene extends Phaser.Scene {
 
   private async reshuffle(): Promise<void> {
     this.popCombo(0, 'No moves — reshuffling!');
-    this.grid = createGrid();
+    this.grid = createGrid(this.random, this.activeColors());
     for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
       const old = this.tiles[r][c];
       if (old) this.releaseTile(old);
@@ -813,7 +870,7 @@ export class GameScene extends Phaser.Scene {
     }
     const proms: Promise<void>[] = [];
     for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
-      proms.push(this.moveTile(this.tiles[r][c]!, cellCenter(r, c).y, r * 30, 'Bounce.easeOut'));
+      proms.push(this.moveTile(this.tiles[r][c]!, cellCenter(r, c).y, r * 24));
     }
     await Promise.all(proms);
   }
@@ -826,17 +883,75 @@ export class GameScene extends Phaser.Scene {
       this.best = this.score;
       setBest(this.best);
     }
+    if (this.mode === 'endless' || this.mode === 'time') setModeBest(this.mode, this.score);
+    if (this.mode === 'endless') this.movesText.setText(String(getModeBest('endless')));
     this.tweens.addCounter({
-      from: this.shown, to: this.score, duration: 300,
+      from: this.shown, to: this.score, duration: ANIM.scoreCount,
       onUpdate: (t) => { this.shown = Math.floor(t.getValue() ?? 0); this.scoreText.setText(String(this.shown)); },
     });
-    this.tweens.add({ targets: this.scoreText, scale: { from: 1.35, to: 1 }, duration: 260, ease: 'Back.easeOut' });
+    this.tweens.add({ targets: this.scoreText, scale: { from: 1.35, to: 1 }, duration: ANIM.scorePulse, ease: 'Back.easeOut' });
+  }
+
+  private activeColors(): number {
+    return this.mode === 'campaign' ? this.level.colors : this.modeRules.colors;
+  }
+
+  /** A short fixed-point pause gives cascades a readable rhythm. */
+  private cascadeBeat(): Promise<void> {
+    return new Promise((resolve) => { this.time.delayedCall(ANIM.cascadeBeat, resolve); });
+  }
+
+  private startTimer(): void {
+    this.clearTimer();
+    this.timerEvent = this.time.addEvent({
+      delay: 1000,
+      repeat: (this.modeRules.seconds ?? 60) - 1,
+      callback: () => {
+        this.timeLeft = Math.max(0, this.timeLeft - 1);
+        this.updateHud();
+        if (this.timeLeft > 0) return;
+        this.timeExpired = true;
+        if (!this.busy) this.finishTimed();
+      },
+    });
+  }
+
+  private clearTimer(): void {
+    this.timerEvent?.remove(false);
+    this.timerEvent = null;
+  }
+
+  private finishTimed(): void {
+    if (this.ended) return;
+    this.ended = true;
+    this.clearTimer();
+    setModeBest('time', this.score);
+    this.scene.launch('result', {
+      mode: 'time', score: this.score, best: getModeBest('time'), title: 'TIME!', subtitle: '60-second run complete',
+    });
+    this.scene.pause();
+  }
+
+  private finishDaily(): void {
+    if (this.ended) return;
+    this.ended = true;
+    const result = recordDailyResult(this.dailyKey, this.score);
+    this.scene.launch('result', {
+      mode: 'daily', score: this.score, best: result.best, streak: result.streak,
+      title: 'DAILY COMPLETE', subtitle: dailyShare(this.dailyKey, this.score),
+    });
+    this.scene.pause();
+  }
+
+  private quitToMenu(): void {
+    this.clearTimer();
+    this.scene.start('menu');
   }
 
   private popCombo(mult: number, text?: string): void {
     this.comboText.setText(text ?? `COMBO x${mult}!`);
     this.comboText.setScale(0.4).setAlpha(1);
-    this.tweens.add({ targets: this.comboText, scale: 1.15, duration: 220, ease: 'Back.easeOut' });
-    this.tweens.add({ targets: this.comboText, alpha: 0, delay: 550, duration: 350 });
+    this.tweens.add({ targets: this.comboText, scale: 1.15, duration: ANIM.comboIn, ease: 'Back.easeOut' });
+    this.tweens.add({ targets: this.comboText, alpha: 0, delay: ANIM.comboHold, duration: ANIM.comboOut });
   }
 }

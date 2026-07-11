@@ -2,7 +2,7 @@
  * Victory overlay, launched over the paused GameScene when a level's goal is
  * met. Celebrates with raining multi-colour confetti, a staggered star reveal,
  * a score count-up and the win fanfare, then offers Next (advance a level) or
- * Home. On the final level it congratulates and shows Home only.
+ * Home. The campaign is endless, so Next is always available.
  *
  * Launched via scene.launch('win', data) with GameScene paused underneath, so
  * the settled board stays visible behind the dimmer.
@@ -12,7 +12,6 @@ import Phaser from 'phaser';
 import { GAME_W, GAME_H } from '../game/config';
 import { COLORS } from '../ui/theme';
 import { makeButton } from '../ui/Button';
-import { LEVEL_COUNT } from '../game/levels';
 import { sfxWin } from '../game/sound';
 import { afterFadeOut, fadeIn } from '../ui/transitions';
 
@@ -41,7 +40,6 @@ export class WinScene extends Phaser.Scene {
   }
 
   create(): void {
-    const isLast = this.level >= LEVEL_COUNT - 1;
     fadeIn(this);
 
     // Dimmer swallows taps so the frozen board can't be poked.
@@ -54,15 +52,9 @@ export class WinScene extends Phaser.Scene {
     panel.lineStyle(3, 0xffffff, 0.14);
     panel.strokeRoundedRect(px - pw / 2, py - ph / 2, pw, ph, 30);
 
-    this.add.text(px, py - ph / 2 + 80, isLast ? 'YOU WIN!' : 'Level Complete!', {
-      fontFamily: 'system-ui, sans-serif', fontSize: isLast ? '64px' : '54px', fontStyle: '800', color: '#ffffff',
+    this.add.text(px, py - ph / 2 + 80, 'Level Complete!', {
+      fontFamily: 'system-ui, sans-serif', fontSize: '54px', fontStyle: '800', color: '#ffffff',
     }).setOrigin(0.5).setShadow(0, 4, '#00000088', 8);
-
-    if (isLast) {
-      this.add.text(px, py - ph / 2 + 150, 'You finished all levels! 🎉', {
-        fontFamily: 'system-ui', fontSize: '28px', fontStyle: '700', color: '#b9a7e6', align: 'center',
-      }).setOrigin(0.5);
-    }
 
     // ----- star reveal: three sockets, then pop earned stars in one-by-one -----
     this.buildStars(px, py - 150);
@@ -80,21 +72,16 @@ export class WinScene extends Phaser.Scene {
     });
 
     // ----- buttons -----
-    if (isLast) {
-      makeButton(this, px, py + ph / 2 - 90, '⌂  Home', () => this.goHome(),
-        { width: 360, height: 92, fontSize: 38, bg: COLORS.primary });
-    } else {
-      makeButton(this, px, py + ph / 2 - 150, '▶  Next', () => {
-        afterFadeOut(this, () => {
-          this.scene.stop('game');
-          this.scene.start('game', { level: this.level + 1 });
-          this.scene.stop();
-        });
-      }, { width: 360, height: 96, fontSize: 42, bg: COLORS.primary });
+    makeButton(this, px, py + ph / 2 - 150, '▶  Next', () => {
+      afterFadeOut(this, () => {
+        this.scene.stop('game');
+        this.scene.start('game', { mode: 'campaign', level: this.level + 1 });
+        this.scene.stop();
+      });
+    }, { width: 360, height: 96, fontSize: 42, bg: COLORS.primary });
 
-      makeButton(this, px, py + ph / 2 - 50, '⌂  Home', () => this.goHome(),
-        { width: 360, height: 84 });
-    }
+    makeButton(this, px, py + ph / 2 - 50, '⌂  Home', () => this.goHome(),
+      { width: 360, height: 84 });
 
     // ----- celebration: fanfare + confetti -----
     sfxWin();

@@ -73,6 +73,29 @@ export const SPECIAL_CREATE_POINTS = 60;
 /** Bonus awarded each time a special tile detonates. */
 export const SPECIAL_DETONATE_POINTS = 50;
 
+/** Central gameplay motion tuning. Simple swaps resolve in roughly 0.8 seconds. */
+export const ANIM = {
+  initialFall: 380,
+  fall: 350,
+  swap: 205,
+  pop: 175,
+  specialForge: 250,
+  cascadeBeat: 75,
+  selectionPulse: 420,
+  invalidShake: 120,
+  beam: 340,
+  bombFlash: 420,
+  bombRing: 480,
+  scoreCount: 300,
+  scorePulse: 260,
+  comboIn: 220,
+  comboHold: 550,
+  comboOut: 350,
+  fallEase: 'Back.easeOut',
+  swapEase: 'Sine.easeInOut',
+  popEase: 'Quad.easeOut',
+} as const;
+
 /** Pixel centre of the cell at (row, col). */
 export function cellCenter(row: number, col: number): { x: number; y: number } {
   return {

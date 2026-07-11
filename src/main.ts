@@ -7,6 +7,7 @@ import { PauseScene } from './scenes/PauseScene';
 import { SettingsScene } from './scenes/SettingsScene';
 import { WinScene } from './scenes/WinScene';
 import { LoseScene } from './scenes/LoseScene';
+import { ResultScene } from './scenes/ResultScene';
 import { startMusic } from './game/music';
 
 const game = new Phaser.Game({
@@ -24,7 +25,7 @@ const game = new Phaser.Game({
     height: GAME_H,
   },
   // MenuScene boots first; the rest are started/launched on demand.
-  scene: [MenuScene, GameScene, PauseScene, SettingsScene, WinScene, LoseScene],
+  scene: [MenuScene, GameScene, PauseScene, SettingsScene, WinScene, LoseScene, ResultScene],
 });
 
 // Music may only begin inside a user gesture. Calling this on every primary

@@ -60,7 +60,7 @@ export class LoseScene extends Phaser.Scene {
       // Fresh restart of the same level — GameScene.create() re-inits all state.
       afterFadeOut(this, () => {
         this.scene.stop('game');
-        this.scene.start('game', { level: this.level });
+        this.scene.start('game', { mode: 'campaign', level: this.level });
         this.scene.stop();
       });
     }, { width: 360, height: 96, fontSize: 42, bg: COLORS.primary });

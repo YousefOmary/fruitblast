@@ -4,7 +4,7 @@
  * unit-tested and reasoned about independently of the animated view.
  */
 
-import { COLS, ROWS, KIND_COUNT } from './config';
+import { COLS, ROWS, KIND_COUNT } from './config.ts';
 
 export type Grid = number[][];
 
@@ -16,10 +16,10 @@ export interface Run {
   horizontal: boolean;
 }
 
-const randKind = (): number => Math.floor(Math.random() * KIND_COUNT);
-
 /** Build a full board with NO pre-existing runs, so the first move is the player's. */
-export function createGrid(): Grid {
+export function createGrid(random: () => number = Math.random, kindCount = KIND_COUNT): Grid {
+  const colors = Math.max(3, Math.min(KIND_COUNT, Math.floor(kindCount)));
+  const randKind = (): number => Math.floor(random() * colors);
   const grid: Grid = Array.from({ length: ROWS }, () => Array<number>(COLS).fill(-1));
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
