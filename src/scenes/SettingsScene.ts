@@ -5,7 +5,7 @@
 
 import Phaser from 'phaser';
 import { GAME_W, GAME_H } from '../game/config';
-import { COLORS } from '../ui/theme';
+import { COLORS, FONT_UI } from '../ui/theme';
 import { makeButton } from '../ui/Button';
 import { getMuted, setMuted } from '../game/sound';
 import { getMusic } from '../game/storage';
@@ -28,28 +28,29 @@ export class SettingsScene extends Phaser.Scene {
     panel.strokeRoundedRect(px - pw / 2, py - ph / 2, pw, ph, 30);
 
     this.add.text(px, py - ph / 2 + 70, 'SETTINGS', {
-      fontFamily: 'system-ui, sans-serif', fontSize: '56px', fontStyle: '800', color: '#ffffff',
+      fontFamily: FONT_UI, fontSize: '56px', fontStyle: '800', color: '#ffffff',
     }).setOrigin(0.5).setShadow(0, 4, '#00000088', 8);
 
     const sound = makeButton(this, px, py - 70, this.soundLabel(), () => {
       setMuted(!getMuted());
       sound.setLabel(this.soundLabel());
-    }, { width: 420, height: 92, fontSize: 36 });
+      sound.setIcon(getMuted() ? 'soundOff' : 'soundOn');
+    }, { width: 420, height: 92, fontSize: 36, icon: getMuted() ? 'soundOff' : 'soundOn' });
 
     const music = makeButton(this, px, py + 50, this.musicLabel(), () => {
       setMusicEnabled(!getMusic());
       music.setLabel(this.musicLabel());
-    }, { width: 420, height: 92, fontSize: 36 });
+    }, { width: 420, height: 92, fontSize: 36, icon: 'music' });
 
     makeButton(this, px, py + ph / 2 - 70, 'Back', () => this.scene.stop(),
-      { width: 260, height: 80, bg: COLORS.primary });
+      { width: 260, height: 80, bg: COLORS.primary, icon: 'back' });
   }
 
   private soundLabel(): string {
-    return getMuted() ? '🔇  Sound: Off' : '🔊  Sound: On';
+    return getMuted() ? 'Sound: Off' : 'Sound: On';
   }
 
   private musicLabel(): string {
-    return getMusic() ? '🎵  Music: On' : '🎵  Music: Off';
+    return getMusic() ? 'Music: On' : 'Music: Off';
   }
 }

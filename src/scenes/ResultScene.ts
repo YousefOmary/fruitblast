@@ -3,9 +3,10 @@
 import Phaser from 'phaser';
 import { GAME_W, GAME_H } from '../game/config';
 import type { GameMode } from '../game/modes';
-import { COLORS } from '../ui/theme';
+import { COLORS, FONT_UI } from '../ui/theme';
 import { makeButton } from '../ui/Button';
 import { afterFadeOut, fadeIn } from '../ui/transitions';
+import { REDUCED_MOTION } from '../ui/motion';
 
 interface ResultData {
   mode: Extract<GameMode, 'time' | 'daily'>;
@@ -38,40 +39,41 @@ export class ResultScene extends Phaser.Scene {
     panel.strokeRoundedRect(px - pw / 2, py - ph / 2, pw, ph, 30);
 
     this.add.text(px, py - 280, data.title, {
-      fontFamily: 'system-ui', fontSize: '48px', fontStyle: '800', color: '#ffffff', align: 'center',
+      fontFamily: FONT_UI, fontSize: '48px', fontStyle: '800', color: '#ffffff', align: 'center',
     }).setOrigin(0.5).setShadow(0, 4, '#00000088', 8);
     this.add.text(px, py - 180, 'SCORE', {
-      fontFamily: 'system-ui', fontSize: '24px', fontStyle: '700', color: '#b9a7e6',
+      fontFamily: FONT_UI, fontSize: '24px', fontStyle: '700', color: '#b9a7e6',
     }).setOrigin(0.5);
     const score = this.add.text(px, py - 105, '0', {
-      fontFamily: 'system-ui', fontSize: '76px', fontStyle: '800', color: '#ffd23f',
+      fontFamily: FONT_UI, fontSize: '76px', fontStyle: '800', color: '#ffd23f',
     }).setOrigin(0.5);
-    this.tweens.addCounter({
+    if (REDUCED_MOTION) score.setText(String(data.score));
+    else this.tweens.addCounter({
       from: 0, to: data.score, duration: 850, ease: 'Cubic.easeOut',
       onUpdate: (t) => score.setText(String(Math.floor(t.getValue() ?? 0))),
     });
 
     const details = data.mode === 'daily'
-      ? `Today's best: ${data.best}   •   🔥 ${data.streak ?? 1}\n\n${data.subtitle}`
+      ? `Today's best: ${data.best}   ·   ${data.streak ?? 1}-day streak\n\n${data.subtitle}`
       : `Best: ${data.best}\n${data.subtitle}`;
     this.add.text(px, py + 30, details, {
-      fontFamily: 'system-ui', fontSize: '27px', fontStyle: '700', color: '#e7dcff',
+      fontFamily: FONT_UI, fontSize: '27px', fontStyle: '700', color: '#e7dcff',
       align: 'center', lineSpacing: 8, wordWrap: { width: 490 },
     }).setOrigin(0.5);
 
     if (data.mode === 'daily') {
-      const share = makeButton(this, px, py + 155, '📋  Copy result', () => {
+      const share = makeButton(this, px, py + 155, 'Copy result', () => {
         void navigator.clipboard?.writeText(data.subtitle).then(
-          () => share.setLabel('✓  Copied!'),
+          () => { share.setLabel('Copied!'); share.setIcon('check'); },
           () => share.setLabel('Result shown above'),
         );
-      }, { width: 350, height: 76, fontSize: 29, bg: COLORS.secondary });
+      }, { width: 350, height: 76, fontSize: 29, bg: COLORS.secondary, icon: 'copy' });
     }
 
-    makeButton(this, px, py + 255, '↻  Play again', () => this.restart(),
-      { width: 360, height: 86, fontSize: 34, bg: COLORS.primary });
-    makeButton(this, px, py + 345, '⌂  Home', () => this.home(),
-      { width: 360, height: 74, fontSize: 30 });
+    makeButton(this, px, py + 255, 'Play again', () => this.restart(),
+      { width: 360, height: 86, fontSize: 34, bg: COLORS.primary, icon: 'restart' });
+    makeButton(this, px, py + 345, 'Home', () => this.home(),
+      { width: 360, height: 74, fontSize: 30, icon: 'home' });
   }
 
   private restart(): void {

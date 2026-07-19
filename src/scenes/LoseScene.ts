@@ -8,9 +8,10 @@
 
 import Phaser from 'phaser';
 import { GAME_W, GAME_H } from '../game/config';
-import { COLORS } from '../ui/theme';
+import { COLORS, FONT_UI } from '../ui/theme';
 import { makeButton } from '../ui/Button';
 import { afterFadeOut, fadeIn } from '../ui/transitions';
+import { ensureIconTextures, iconTexture } from '../ui/art';
 
 /** Payload from GameScene: which level, and the goal-progress readout at defeat. */
 interface LoseData {
@@ -36,6 +37,7 @@ export class LoseScene extends Phaser.Scene {
 
   create(): void {
     fadeIn(this);
+    ensureIconTextures(this);
     this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.68).setInteractive();
 
     const pw = 560, ph = 620, px = GAME_W / 2, py = GAME_H / 2;
@@ -46,31 +48,31 @@ export class LoseScene extends Phaser.Scene {
     panel.strokeRoundedRect(px - pw / 2, py - ph / 2, pw, ph, 30);
 
     this.add.text(px, py - ph / 2 + 90, 'Out of moves', {
-      fontFamily: 'system-ui, sans-serif', fontSize: '54px', fontStyle: '800', color: '#ffffff',
+      fontFamily: FONT_UI, fontSize: '54px', fontStyle: '800', color: '#ffffff',
     }).setOrigin(0.5).setShadow(0, 4, '#00000088', 8);
 
-    this.add.text(px, py - 60, '😔', { fontSize: '86px' }).setOrigin(0.5);
+    this.add.image(px, py - 60, iconTexture('loss')).setDisplaySize(88, 88).setTint(0xb9a7e6);
 
     this.add.text(px, py + 40, `${this.goalText}\n${this.progressText}`, {
-      fontFamily: 'system-ui', fontSize: '32px', fontStyle: '700', color: '#e7dcff',
+      fontFamily: FONT_UI, fontSize: '32px', fontStyle: '700', color: '#e7dcff',
       align: 'center', lineSpacing: 10,
     }).setOrigin(0.5);
 
-    makeButton(this, px, py + ph / 2 - 150, '↻  Retry', () => {
+    makeButton(this, px, py + ph / 2 - 150, 'Retry', () => {
       // Fresh restart of the same level — GameScene.create() re-inits all state.
       afterFadeOut(this, () => {
         this.scene.stop('game');
         this.scene.start('game', { mode: 'campaign', level: this.level });
         this.scene.stop();
       });
-    }, { width: 360, height: 96, fontSize: 42, bg: COLORS.primary });
+    }, { width: 360, height: 96, fontSize: 42, bg: COLORS.primary, icon: 'restart' });
 
-    makeButton(this, px, py + ph / 2 - 50, '⌂  Home', () => {
+    makeButton(this, px, py + ph / 2 - 50, 'Home', () => {
       afterFadeOut(this, () => {
         this.scene.stop('game');
         this.scene.start('menu');
         this.scene.stop();
       });
-    }, { width: 360, height: 84 });
+    }, { width: 360, height: 84, icon: 'home' });
   }
 }

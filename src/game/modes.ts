@@ -13,8 +13,8 @@ export interface ModeConfig {
 
 export function modeConfig(mode: GameMode): ModeConfig {
   if (mode === 'endless') return { title: 'ZEN', limit: 'none', colors: 5 };
-  if (mode === 'time') return { title: 'TIME ATTACK', limit: 'time', seconds: 60, colors: 5 };
-  if (mode === 'daily') return { title: 'DAILY CHALLENGE', limit: 'moves', moves: 20, colors: 5 };
+  if (mode === 'time') return { title: 'TIME ATTACK', limit: 'time', seconds: 120, colors: 5 };
+  if (mode === 'daily') return { title: 'DAILY CHALLENGE', limit: 'moves', moves: 30, colors: 5 };
   return { title: 'CAMPAIGN', limit: 'moves', colors: 6 };
 }
 
@@ -48,6 +48,6 @@ export function dailySeed(dateKey: string): number { return hashString(`fruitbla
 
 /** Spoiler-free share text: result only, never board state or moves. */
 export function dailyShare(dateKey: string, score: number): string {
-  const medal = score >= 6000 ? '🏆' : score >= 3500 ? '⭐' : score >= 1800 ? '🍍' : '🌱';
-  return `Fruit Blast Daily ${dateKey}\n${medal} ${score.toLocaleString('en-US')} points`;
+  const rank = score >= 9000 ? 'CROWN' : score >= 5200 ? 'GOLD' : score >= 2600 ? 'SILVER' : 'FRESH';
+  return `Fruit Blast Daily ${dateKey}\n${rank} · ${score.toLocaleString('en-US')} points`;
 }

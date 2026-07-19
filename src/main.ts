@@ -10,30 +10,37 @@ import { LoseScene } from './scenes/LoseScene';
 import { ResultScene } from './scenes/ResultScene';
 import { startMusic } from './game/music';
 
-const game = new Phaser.Game({
-  type: Phaser.AUTO,
-  parent: 'game',
-  backgroundColor: '#140a24',
-  // Prefer the discrete GPU and round to whole pixels — steadier frame pacing
-  // on phones; target 60fps.
-  render: { powerPreference: 'high-performance', roundPixels: true },
-  fps: { target: 60, forceSetTimeOut: false },
-  scale: {
-    mode: Phaser.Scale.FIT,
-    autoCenter: Phaser.Scale.CENTER_BOTH,
-    width: GAME_W,
-    height: GAME_H,
-  },
-  // MenuScene boots first; the rest are started/launched on demand.
-  scene: [MenuScene, GameScene, PauseScene, SettingsScene, WinScene, LoseScene, ResultScene],
-});
+async function loadLocalFont(): Promise<void> {
+  if (!('FontFace' in window)) return;
+  const url = new URL('./assets/manrope-latin.woff2', import.meta.url).href;
+  const face = new FontFace('Fruit Sans', `url(${url}) format('woff2')`, { weight: '200 800', style: 'normal' });
+  const load = face.load().then((loaded) => { document.fonts.add(loaded); });
+  await Promise.race([load, new Promise<void>((resolve) => window.setTimeout(resolve, 1200))]).catch(() => undefined);
+}
 
-// Music may only begin inside a user gesture. Calling this on every primary
-// pointerdown is safe: startMusic() is idempotent and checks both preferences.
-document.getElementById('game')?.addEventListener('pointerdown', startMusic);
+async function boot(): Promise<void> {
+  await loadLocalFont();
+  const game = new Phaser.Game({
+    type: Phaser.AUTO,
+    parent: 'game',
+    backgroundColor: '#140a24',
+    render: { powerPreference: 'high-performance', roundPixels: true },
+    fps: { target: 60, forceSetTimeOut: false },
+    scale: {
+      mode: Phaser.Scale.FIT,
+      autoCenter: Phaser.Scale.CENTER_BOTH,
+      width: GAME_W,
+      height: GAME_H,
+    },
+    scene: [MenuScene, GameScene, PauseScene, SettingsScene, WinScene, LoseScene, ResultScene],
+  });
 
-// Keep board drags inside the canvas on mobile: no page scroll, refresh or
-// browser gesture should steal the touch sequence from Phaser.
-const preventNativeGesture = (event: TouchEvent): void => event.preventDefault();
-game.canvas.addEventListener('touchstart', preventNativeGesture, { passive: false });
-game.canvas.addEventListener('touchmove', preventNativeGesture, { passive: false });
+  // Music may only begin inside a user gesture. Calling this on every primary
+  // pointerdown is safe: startMusic() is idempotent and checks preferences.
+  document.getElementById('game')?.addEventListener('pointerdown', startMusic);
+  const preventNativeGesture = (event: TouchEvent): void => event.preventDefault();
+  game.canvas.addEventListener('touchstart', preventNativeGesture, { passive: false });
+  game.canvas.addEventListener('touchmove', preventNativeGesture, { passive: false });
+}
+
+void boot();

@@ -18,6 +18,9 @@ export const COLORS = {
   panel: 0x1b1030, // overlay panel fill (same as bomb gem)
 } as const;
 
+/** Loaded locally before Phaser boots; fallbacks never require a network request. */
+export const FONT_UI = "'Fruit Sans', system-ui, sans-serif";
+
 /** Paint the full-screen purple gradient used by every scene. */
 export function paintBackground(scene: Phaser.Scene): void {
   const g = scene.add.graphics();

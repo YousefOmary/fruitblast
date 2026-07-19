@@ -5,14 +5,14 @@ import { getLevel, starsFor } from '../src/game/levels.ts';
 test('generates valid, fair-looking levels at arbitrary indices', () => {
   for (const index of [0, 1, 7, 8, 25, 100, 1000]) {
     const level = getLevel(index);
-    assert.ok(level.moves >= 16 && level.moves <= 20);
+    assert.ok(level.moves >= 25 && level.moves <= 240);
     assert.ok(level.colors >= 4 && level.colors <= 6);
     assert.ok(level.stars[0] < level.stars[1] && level.stars[1] < level.stars[2]);
     if (level.goal.type === 'score') {
       assert.ok(level.goal.target / level.moves < 1500, `level ${index} score target stays reachable-ish`);
       assert.equal(level.stars[0], level.goal.target);
     } else {
-      assert.ok(level.goal.count / level.moves < 2.5, `level ${index} collect quota stays reachable-ish`);
+      assert.ok(level.goal.count / level.moves < 2.15, `level ${index} collect quota stays reachable-ish`);
       assert.ok(level.goal.kind < level.colors);
     }
   }
@@ -38,4 +38,14 @@ test('star ratings use generated thresholds', () => {
   assert.equal(starsFor(level, level.stars[0] - 1), 0);
   assert.equal(starsFor(level, level.stars[0]), 1);
   assert.equal(starsFor(level, level.stars[2]), 3);
+});
+
+test('campaign goal signatures do not repeat', () => {
+  const seen = new Set();
+  for (let index = 0; index < 2000; index++) {
+    const goal = getLevel(index).goal;
+    const signature = goal.type === 'score' ? `score:${goal.target}` : `collect:${goal.kind}:${goal.count}`;
+    assert.ok(!seen.has(signature), `level ${index + 1} repeats ${signature}`);
+    seen.add(signature);
+  }
 });

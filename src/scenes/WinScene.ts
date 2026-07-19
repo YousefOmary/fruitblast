@@ -10,10 +10,11 @@
 
 import Phaser from 'phaser';
 import { GAME_W, GAME_H } from '../game/config';
-import { COLORS } from '../ui/theme';
+import { COLORS, FONT_UI } from '../ui/theme';
 import { makeButton } from '../ui/Button';
 import { sfxWin } from '../game/sound';
 import { afterFadeOut, fadeIn } from '../ui/transitions';
+import { REDUCED_MOTION } from '../ui/motion';
 
 /** Payload from GameScene describing the level just cleared. */
 interface WinData {
@@ -53,7 +54,7 @@ export class WinScene extends Phaser.Scene {
     panel.strokeRoundedRect(px - pw / 2, py - ph / 2, pw, ph, 30);
 
     this.add.text(px, py - ph / 2 + 80, 'Level Complete!', {
-      fontFamily: 'system-ui, sans-serif', fontSize: '54px', fontStyle: '800', color: '#ffffff',
+      fontFamily: FONT_UI, fontSize: '54px', fontStyle: '800', color: '#ffffff',
     }).setOrigin(0.5).setShadow(0, 4, '#00000088', 8);
 
     // ----- star reveal: three sockets, then pop earned stars in one-by-one -----
@@ -61,27 +62,28 @@ export class WinScene extends Phaser.Scene {
 
     // ----- score count-up -----
     this.add.text(px, py + 30, 'SCORE', {
-      fontFamily: 'system-ui', fontSize: '24px', fontStyle: '700', color: '#b9a7e6',
+      fontFamily: FONT_UI, fontSize: '24px', fontStyle: '700', color: '#b9a7e6',
     }).setOrigin(0.5);
     const scoreText = this.add.text(px, py + 84, '0', {
-      fontFamily: 'system-ui', fontSize: '68px', fontStyle: '800', color: '#ffd23f',
+      fontFamily: FONT_UI, fontSize: '68px', fontStyle: '800', color: '#ffd23f',
     }).setOrigin(0.5);
-    this.tweens.addCounter({
+    if (REDUCED_MOTION) scoreText.setText(String(this.score));
+    else this.tweens.addCounter({
       from: 0, to: this.score, duration: 900, delay: 300, ease: 'Cubic.easeOut',
       onUpdate: (t) => scoreText.setText(String(Math.floor(t.getValue() ?? 0))),
     });
 
     // ----- buttons -----
-    makeButton(this, px, py + ph / 2 - 150, '▶  Next', () => {
+    makeButton(this, px, py + ph / 2 - 150, 'Next level', () => {
       afterFadeOut(this, () => {
         this.scene.stop('game');
         this.scene.start('game', { mode: 'campaign', level: this.level + 1 });
         this.scene.stop();
       });
-    }, { width: 360, height: 96, fontSize: 42, bg: COLORS.primary });
+    }, { width: 360, height: 96, fontSize: 39, bg: COLORS.primary, icon: 'next' });
 
-    makeButton(this, px, py + ph / 2 - 50, '⌂  Home', () => this.goHome(),
-      { width: 360, height: 84 });
+    makeButton(this, px, py + ph / 2 - 50, 'Home', () => this.goHome(),
+      { width: 360, height: 84, icon: 'home' });
 
     // ----- celebration: fanfare + confetti -----
     sfxWin();
@@ -101,21 +103,25 @@ export class WinScene extends Phaser.Scene {
     const gap = 130, size = 46;
     for (let i = 0; i < 3; i++) {
       const x = cx + (i - 1) * gap;
-      // Dim socket always visible so the player sees what they missed.
-      this.add.text(x, cy, '★', { fontSize: `${size + 12}px`, color: '#3a2568' }).setOrigin(0.5);
+      const socket = this.add.graphics().setPosition(x, cy);
+      socket.fillStyle(0x3a2568, 1); socket.fillPoints(starPoints(size), true);
       if (i >= this.stars) continue;
-      const star = this.add.text(x, cy, '★', { fontSize: `${size + 12}px`, color: '#ffd23f' })
-        .setOrigin(0.5).setScale(0).setShadow(0, 3, '#00000088', 6);
-      this.tweens.add({
-        targets: star, scale: 1, duration: 380, delay: 450 + i * 260, ease: 'Back.easeOut',
-        onStart: () => this.starPop(x, cy),
-      });
+      const star = this.add.graphics().setPosition(x, cy);
+      star.fillStyle(STAR_COLOR, 1); star.fillPoints(starPoints(size), true);
+      if (REDUCED_MOTION) star.setScale(1);
+      else {
+        star.setScale(0);
+        this.tweens.add({
+          targets: star, scale: 1, duration: 380, delay: 450 + i * 260, ease: 'Back.easeOut',
+          onStart: () => this.starPop(x, cy),
+        });
+      }
     }
   }
 
   /** A little burst behind a star as it lands. */
   private starPop(x: number, y: number): void {
-    if (!this.textures.exists('spark')) return;
+    if (REDUCED_MOTION || !this.textures.exists('spark')) return;
     const e = this.add.particles(0, 0, 'spark', {
       speed: { min: 80, max: 220 }, lifespan: 520, scale: { start: 0.9, end: 0 },
       quantity: 1, emitting: false, tint: STAR_COLOR, blendMode: 'ADD',
@@ -126,7 +132,7 @@ export class WinScene extends Phaser.Scene {
 
   /** Multi-colour confetti raining from above the panel for a few seconds. */
   private rainConfetti(): void {
-    if (!this.textures.exists('spark')) return;
+    if (REDUCED_MOTION || !this.textures.exists('spark')) return;
     const tints = [0xff3b6b, 0xff9f1c, 0xffd23f, 0x33d9a6, 0x5b8cff, 0xb06bff];
     const e = this.add.particles(0, -20, 'spark', {
       x: { min: 0, max: GAME_W },
@@ -144,4 +150,14 @@ export class WinScene extends Phaser.Scene {
     this.time.delayedCall(1800, () => e.stop());
     this.time.delayedCall(1800 + 2700, () => e.destroy());
   }
+}
+
+function starPoints(radius: number): Phaser.Geom.Point[] {
+  const points: Phaser.Geom.Point[] = [];
+  for (let i = 0; i < 10; i++) {
+    const angle = -Math.PI / 2 + i * Math.PI / 5;
+    const r = i % 2 === 0 ? radius : radius * 0.44;
+    points.push(new Phaser.Geom.Point(Math.cos(angle) * r, Math.sin(angle) * r));
+  }
+  return points;
 }
