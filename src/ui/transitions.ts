@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { REDUCED_MOTION } from './motion';
 
 const FADE_MS = 170;
 const FADE_COLOR = { red: 20, green: 10, blue: 36 };
@@ -8,12 +9,13 @@ export function fadeIn(scene: Phaser.Scene): void {
   // Phaser reuses scene instances, so a scene that faded out earlier can come
   // back with input still disabled — always re-enable it on entry.
   scene.input.enabled = true;
-  scene.cameras.main.fadeIn(FADE_MS, FADE_COLOR.red, FADE_COLOR.green, FADE_COLOR.blue);
+  if (!REDUCED_MOTION) scene.cameras.main.fadeIn(FADE_MS, FADE_COLOR.red, FADE_COLOR.green, FADE_COLOR.blue);
 }
 
 /** Fade the current scene, then run a navigation action exactly once. */
 export function afterFadeOut(scene: Phaser.Scene, action: () => void): void {
   scene.input.enabled = false;
+  if (REDUCED_MOTION) { action(); return; }
   let done = false;
   const run = (): void => { if (done) return; done = true; action(); };
   scene.cameras.main.once('camerafadeoutcomplete', run);

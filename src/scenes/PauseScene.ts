@@ -7,7 +7,7 @@
 
 import Phaser from 'phaser';
 import { GAME_W, GAME_H } from '../game/config';
-import { COLORS } from '../ui/theme';
+import { COLORS, FONT_UI } from '../ui/theme';
 import { makeButton } from '../ui/Button';
 import { getMuted, setMuted } from '../game/sound';
 import { afterFadeOut } from '../ui/transitions';
@@ -39,15 +39,15 @@ export class PauseScene extends Phaser.Scene {
     panel.strokeRoundedRect(px - pw / 2, py - ph / 2, pw, ph, 30);
 
     this.add.text(px, py - ph / 2 + 70, 'PAUSED', {
-      fontFamily: 'system-ui, sans-serif', fontSize: '58px', fontStyle: '800', color: '#ffffff',
+      fontFamily: FONT_UI, fontSize: '58px', fontStyle: '800', color: '#ffffff',
     }).setOrigin(0.5).setShadow(0, 4, '#00000088', 8);
 
-    makeButton(this, px, py - 150, '▶  Resume', () => {
+    makeButton(this, px, py - 150, 'Resume', () => {
       this.scene.resume('game');
       this.scene.stop();
-    }, { width: 380, height: 96, fontSize: 40, bg: COLORS.primary });
+    }, { width: 380, height: 96, fontSize: 40, bg: COLORS.primary, icon: 'play' });
 
-    makeButton(this, px, py - 30, '↻  Restart', () => {
+    makeButton(this, px, py - 30, 'Restart', () => {
       // Full reset: stop the paused game and boot the SAME level fresh
       // (create() re-inits all state: moves, goal progress, board).
       afterFadeOut(this, () => {
@@ -55,23 +55,24 @@ export class PauseScene extends Phaser.Scene {
         this.scene.start('game', { level: this.level, mode: this.mode });
         this.scene.stop();
       });
-    }, { width: 380, height: 88 });
+    }, { width: 380, height: 88, icon: 'restart' });
 
-    makeButton(this, px, py + 80, '⌂  Home', () => {
+    makeButton(this, px, py + 80, 'Home', () => {
       afterFadeOut(this, () => {
         this.scene.stop('game');
         this.scene.start('menu');
         this.scene.stop();
       });
-    }, { width: 380, height: 88 });
+    }, { width: 380, height: 88, icon: 'home' });
 
     const sound = makeButton(this, px, py + ph / 2 - 80, this.soundLabel(), () => {
       setMuted(!getMuted());
       sound.setLabel(this.soundLabel());
-    }, { width: 380, height: 84 });
+      sound.setIcon(getMuted() ? 'soundOff' : 'soundOn');
+    }, { width: 380, height: 84, icon: getMuted() ? 'soundOff' : 'soundOn' });
   }
 
   private soundLabel(): string {
-    return getMuted() ? '🔇  Sound: Off' : '🔊  Sound: On';
+    return getMuted() ? 'Sound: Off' : 'Sound: On';
   }
 }

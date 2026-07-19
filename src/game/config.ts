@@ -38,20 +38,20 @@ export function swipeTarget(
     : null;
 }
 
-/** One matchable kind: a vibrant gem colour plus a fruit glyph. */
+/** One matchable kind: a vibrant identifier colour plus an accessible fruit name. */
 export interface TileKind {
   color: number;
-  glyph: string;
+  name: string;
 }
 
 /** Six kinds — the standard match-3 count for a fair difficulty. */
 export const KINDS: TileKind[] = [
-  { color: 0xff3b6b, glyph: '🍓' },
-  { color: 0xff9f1c, glyph: '🍊' },
-  { color: 0xffd23f, glyph: '🍋' },
-  { color: 0x33d9a6, glyph: '🥝' },
-  { color: 0x5b8cff, glyph: '🫐' },
-  { color: 0xb06bff, glyph: '🍇' },
+  { color: 0xff3b6b, name: 'Strawberries' },
+  { color: 0xff9f1c, name: 'Oranges' },
+  { color: 0xffd23f, name: 'Lemons' },
+  { color: 0x33d9a6, name: 'Kiwis' },
+  { color: 0x5b8cff, name: 'Blueberries' },
+  { color: 0xb06bff, name: 'Grapes' },
 ];
 
 export const KIND_COUNT = KINDS.length;

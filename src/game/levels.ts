@@ -1,4 +1,4 @@
-/** Endless campaign level generation: eight gentle authored levels followed by a mild curve. */
+/** Endless campaign: twelve roomy authored levels followed by unique procedural goals. */
 
 import { KINDS } from './config.ts';
 
@@ -19,14 +19,18 @@ export interface Level {
 }
 
 const INTRO: readonly Level[] = [
-  { moves: 20, goal: { type: 'score', target: 900 }, colors: 4, stars: [900, 1450, 2100] },
-  { moves: 20, goal: { type: 'collect', kind: 0, count: 12 }, colors: 4, stars: [800, 1350, 2000] },
-  { moves: 19, goal: { type: 'score', target: 1500 }, colors: 4, stars: [1500, 2200, 3100] },
-  { moves: 19, goal: { type: 'collect', kind: 3, count: 16 }, colors: 4, stars: [1100, 1800, 2600] },
-  { moves: 19, goal: { type: 'score', target: 2200 }, colors: 5, stars: [2200, 3100, 4200] },
-  { moves: 18, goal: { type: 'collect', kind: 2, count: 18 }, colors: 5, stars: [1400, 2200, 3100] },
-  { moves: 18, goal: { type: 'score', target: 2900 }, colors: 5, stars: [2900, 4000, 5300] },
-  { moves: 18, goal: { type: 'collect', kind: 4, count: 20 }, colors: 5, stars: [1700, 2600, 3600] },
+  { moves: 28, goal: { type: 'score', target: 1100 }, colors: 4, stars: [1100, 1850, 2700] },
+  { moves: 28, goal: { type: 'collect', kind: 0, count: 14 }, colors: 4, stars: [1000, 1650, 2450] },
+  { moves: 27, goal: { type: 'score', target: 1700 }, colors: 4, stars: [1700, 2550, 3550] },
+  { moves: 27, goal: { type: 'collect', kind: 3, count: 17 }, colors: 4, stars: [1300, 2050, 2950] },
+  { moves: 27, goal: { type: 'score', target: 2400 }, colors: 5, stars: [2400, 3400, 4650] },
+  { moves: 26, goal: { type: 'collect', kind: 2, count: 19 }, colors: 5, stars: [1600, 2450, 3450] },
+  { moves: 26, goal: { type: 'score', target: 3100 }, colors: 5, stars: [3100, 4300, 5700] },
+  { moves: 26, goal: { type: 'collect', kind: 4, count: 21 }, colors: 5, stars: [1900, 2850, 3900] },
+  { moves: 25, goal: { type: 'score', target: 3700 }, colors: 5, stars: [3700, 5050, 6600] },
+  { moves: 25, goal: { type: 'collect', kind: 1, count: 23 }, colors: 5, stars: [2150, 3150, 4300] },
+  { moves: 25, goal: { type: 'score', target: 4300 }, colors: 6, stars: [4300, 5800, 7500] },
+  { moves: 25, goal: { type: 'collect', kind: 5, count: 24 }, colors: 6, stars: [2350, 3450, 4700] },
 ];
 
 /** Fetch a fair campaign level for any non-negative index. */
@@ -35,21 +39,24 @@ export function getLevel(index: number): Level {
   if (i < INTRO.length) return INTRO[i];
 
   const n = i - INTRO.length;
-  const colors = Math.min(6, 5 + Math.floor(n / 12));
-  // Budgets tighten only twice and never below 16. Square-root target growth
-  // leaves specials/cascades ample headroom even at very high levels.
-  const moves = Math.max(16, 18 - Math.floor(n / 16));
+  const colors = Math.min(6, 5 + Math.floor(n / 24));
   if (i % 2 === 0) {
-    const target = round50(3200 + Math.sqrt(n) * 550);
+    const ordinal = Math.floor(n / 2);
+    const moves = 27 + Math.floor(ordinal / 18);
+    const target = 4600 + ordinal * 100;
     return { moves, colors, goal: { type: 'score', target }, stars: scoreStars(target) };
   }
 
-  const count = Math.min(38, Math.round(21 + Math.sqrt(n) * 1.55));
-  const base = round50(1800 + Math.sqrt(n) * 330);
+  const ordinal = Math.floor(n / 2);
+  const early = ordinal < 12;
+  const kind = early ? ordinal % 5 : (ordinal - 12) % 6;
+  const count = early ? 25 + Math.floor(ordinal / 5) : 28 + Math.floor((ordinal - 12) / 6);
+  const moves = Math.max(27, Math.ceil(count / 2.15) + 15);
+  const base = round50(2450 + ordinal * 82);
   return {
     moves,
     colors,
-    goal: { type: 'collect', kind: (i * 5 + 1) % colors, count },
+    goal: { type: 'collect', kind, count },
     stars: [base, round50(base * 1.48), round50(base * 2.05)],
   };
 }
@@ -67,5 +74,5 @@ export function starsFor(level: Level, score: number): number {
 
 /** Human-readable one-liner for a campaign goal. */
 export function goalLabel(goal: Goal): string {
-  return goal.type === 'score' ? `Score ${goal.target}` : `Collect ${KINDS[goal.kind].glyph} ×${goal.count}`;
+  return goal.type === 'score' ? `Score ${goal.target}` : `Collect ${KINDS[goal.kind].name} ×${goal.count}`;
 }

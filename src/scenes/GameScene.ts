@@ -31,8 +31,10 @@ import {
   type GameMode, type ModeConfig,
 } from '../game/modes';
 import { makeButton } from '../ui/Button';
-import { COLORS } from '../ui/theme';
+import { COLORS, FONT_UI } from '../ui/theme';
 import { fadeIn } from '../ui/transitions';
+import { drawFruit, ensureFruitTextures, ensureIconTextures, fruitTexture, iconTexture } from '../ui/art';
+import { REDUCED_MOTION, motionMs } from '../ui/motion';
 
 type Tile = Phaser.GameObjects.Image;
 /** A board coordinate. */
@@ -86,6 +88,7 @@ export class GameScene extends Phaser.Scene {
   private levelText!: Phaser.GameObjects.Text;
   private movesText!: Phaser.GameObjects.Text;
   private goalText!: Phaser.GameObjects.Text;
+  private goalFruit!: Phaser.GameObjects.Image;
   private mode: GameMode = 'campaign';
   private modeRules: ModeConfig = modeConfig('campaign');
   private random: () => number = Math.random;
@@ -138,6 +141,8 @@ export class GameScene extends Phaser.Scene {
 
     this.buildBackground();
     fadeIn(this);
+    ensureFruitTextures(this);
+    ensureIconTextures(this);
     this.buildHud();
     this.buildTopBar();
     this.makeSparkTexture();
@@ -151,7 +156,7 @@ export class GameScene extends Phaser.Scene {
     this.ring = this.add.graphics().setDepth(5).setVisible(false);
     this.ring.lineStyle(5, 0xffffff, 0.95);
     this.ring.strokeRoundedRect(-TILE / 2, -TILE / 2, TILE, TILE, 16);
-    this.tweens.add({ targets: this.ring, scale: { from: 1, to: 1.08 }, yoyo: true, repeat: -1, duration: ANIM.selectionPulse });
+    if (!REDUCED_MOTION) this.tweens.add({ targets: this.ring, scale: { from: 1, to: 1.08 }, yoyo: true, repeat: -1, duration: ANIM.selectionPulse });
 
     this.grid = createGrid(this.random, this.activeColors());
     this.tiles = Array.from({ length: ROWS }, () => Array<Tile | null>(COLS).fill(null));
@@ -168,14 +173,14 @@ export class GameScene extends Phaser.Scene {
   /** Top bar: a Pause button that freezes the board and raises the pause overlay. */
   private buildTopBar(): void {
     if (this.mode === 'endless') {
-      makeButton(this, GAME_W - 70, 60, '⌂', () => this.quitToMenu(),
-        { width: 84, height: 84, fontSize: 40, bg: COLORS.secondary, radius: 22 });
+      makeButton(this, GAME_W - 70, 60, '', () => this.quitToMenu(),
+        { width: 84, height: 84, fontSize: 40, bg: COLORS.secondary, radius: 22, icon: 'home', iconSize: 38 });
       return;
     }
-    makeButton(this, GAME_W - 70, 60, '⏸', () => {
+    makeButton(this, GAME_W - 70, 60, '', () => {
       this.scene.launch('pause', { level: this.levelIndex, mode: this.mode });
       this.scene.pause();
-    }, { width: 84, height: 84, fontSize: 40, bg: COLORS.secondary, radius: 22 });
+    }, { width: 84, height: 84, fontSize: 40, bg: COLORS.secondary, radius: 22, icon: 'pause', iconSize: 38 });
   }
 
   // ---------- scenery ----------
@@ -191,31 +196,32 @@ export class GameScene extends Phaser.Scene {
   private buildHud(): void {
     // Level number, big and centred up top.
     this.levelText = this.add.text(GAME_W / 2, 48, 'LEVEL 1', {
-      fontFamily: 'system-ui, sans-serif', fontSize: '44px', fontStyle: '800', color: '#ffffff',
+      fontFamily: FONT_UI, fontSize: '44px', fontStyle: '800', color: '#ffffff',
     }).setOrigin(0.5).setShadow(0, 4, '#00000066', 8);
 
     // Two stat columns: SCORE (left) and MOVES (right).
     this.add.text(210, 126, 'SCORE', {
-      fontFamily: 'system-ui', fontSize: '24px', fontStyle: '700', color: '#b9a7e6',
+      fontFamily: FONT_UI, fontSize: '24px', fontStyle: '700', color: '#b9a7e6',
     }).setOrigin(0.5);
     this.scoreText = this.add.text(210, 180, '0', {
-      fontFamily: 'system-ui', fontSize: '58px', fontStyle: '800', color: '#ffd23f',
+      fontFamily: FONT_UI, fontSize: '58px', fontStyle: '800', color: '#ffd23f',
     }).setOrigin(0.5);
 
     this.add.text(510, 126, this.modeRules.limit === 'time' ? 'TIME' : this.modeRules.limit === 'none' ? 'BEST' : 'MOVES', {
-      fontFamily: 'system-ui', fontSize: '24px', fontStyle: '700', color: '#b9a7e6',
+      fontFamily: FONT_UI, fontSize: '24px', fontStyle: '700', color: '#b9a7e6',
     }).setOrigin(0.5);
     this.movesText = this.add.text(510, 180, '0', {
-      fontFamily: 'system-ui', fontSize: '58px', fontStyle: '800', color: '#ffffff',
+      fontFamily: FONT_UI, fontSize: '58px', fontStyle: '800', color: '#ffffff',
     }).setOrigin(0.5);
 
     // Goal readout spanning the width, just above the board.
     this.goalText = this.add.text(GAME_W / 2, 292, '', {
-      fontFamily: 'system-ui', fontSize: '34px', fontStyle: '800', color: '#ffffff',
+      fontFamily: FONT_UI, fontSize: '32px', fontStyle: '800', color: '#ffffff',
     }).setOrigin(0.5).setShadow(0, 3, '#00000066', 6);
+    this.goalFruit = this.add.image(0, 292, fruitTexture(0)).setDisplaySize(46, 46).setVisible(false);
 
     this.comboText = this.add.text(GAME_W / 2, BOARD_Y + BOARD_H / 2, '', {
-      fontFamily: 'system-ui', fontSize: '72px', fontStyle: '800', color: '#ffffff',
+      fontFamily: FONT_UI, fontSize: '72px', fontStyle: '800', color: '#ffffff',
     }).setOrigin(0.5).setDepth(20).setAlpha(0).setShadow(0, 4, '#000000aa', 10);
   }
 
@@ -225,12 +231,14 @@ export class GameScene extends Phaser.Scene {
       this.movesText.setText(`${Math.max(0, this.timeLeft)}s`);
       this.movesText.setColor(this.timeLeft <= 10 ? '#ff5b6b' : '#ffffff');
       this.goalText.setText('Score as much as you can!');
+      this.goalFruit.setVisible(false);
       return;
     }
     if (this.modeRules.limit === 'none') {
       this.movesText.setText(String(getModeBest('endless')));
       this.movesText.setColor('#ffffff');
-      this.goalText.setText('Relax • no limits • tap ⌂ to quit');
+      this.goalText.setText('Relax · no limits · use Home to finish');
+      this.goalFruit.setVisible(false);
       return;
     }
 
@@ -238,16 +246,20 @@ export class GameScene extends Phaser.Scene {
     this.movesText.setColor(this.movesLeft <= 3 ? '#ff5b6b' : '#ffffff');
 
     if (this.mode === 'daily') {
-      this.goalText.setText(`${this.dailyKey}  •  Make every move count`);
+      this.goalText.setText(`${this.dailyKey}  ·  Make every move count`);
+      this.goalFruit.setVisible(false);
       return;
     }
 
     const g = this.level.goal;
     if (g.type === 'score') {
-      this.goalText.setText(`🎯  ${Math.min(this.score, g.target)} / ${g.target}`);
+      this.goalText.setText(`SCORE  ${Math.min(this.score, g.target)} / ${g.target}`);
+      this.goalFruit.setTexture(iconTexture('target')).setDisplaySize(36, 36).setTint(0xffd23f).setVisible(true);
     } else {
-      this.goalText.setText(`${KINDS[g.kind].glyph}  ${Math.min(this.collected, g.count)} / ${g.count}`);
+      this.goalText.setText(`${KINDS[g.kind].name.toUpperCase()}  ${Math.min(this.collected, g.count)} / ${g.count}`);
+      this.goalFruit.setTexture(fruitTexture(g.kind)).setDisplaySize(46, 46).clearTint().setVisible(true);
     }
+    this.goalFruit.setX(GAME_W / 2 - this.goalText.width / 2 - 34);
     this.goalText.setColor(this.goalMet() ? '#33d9a6' : '#ffffff');
   }
 
@@ -309,7 +321,7 @@ export class GameScene extends Phaser.Scene {
 
   /** Paint one tile-atlas frame without creating Phaser Graphics or Text objects. */
   private paintTileFrame(ctx: CanvasRenderingContext2D, kind: number, special: Special): void {
-    const { color, glyph } = KINDS[kind];
+    const { color } = KINDS[kind];
     const inset = 5;
     const size = TILE - inset * 2;
     const center = TILE / 2;
@@ -341,28 +353,34 @@ export class GameScene extends Phaser.Scene {
       ctx.restore();
     }
 
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
     if (special === 'lineH' || special === 'lineV') {
-      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
       if (special === 'lineH') {
-        this.roundedRect(ctx, 6, center - 6, TILE - 12, 12, 6);
+        this.roundedRect(ctx, 8, center - 7, TILE - 16, 14, 7);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(4, center); ctx.lineTo(15, center - 10); ctx.lineTo(15, center + 10); ctx.closePath();
+        ctx.moveTo(TILE - 4, center); ctx.lineTo(TILE - 15, center - 10); ctx.lineTo(TILE - 15, center + 10); ctx.closePath();
       } else {
-        this.roundedRect(ctx, center - 6, 6, 12, TILE - 12, 6);
+        this.roundedRect(ctx, center - 7, 8, 14, TILE - 16, 7);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(center, 4); ctx.lineTo(center - 10, 15); ctx.lineTo(center + 10, 15); ctx.closePath();
+        ctx.moveTo(center, TILE - 4); ctx.lineTo(center - 10, TILE - 15); ctx.lineTo(center + 10, TILE - 15); ctx.closePath();
       }
       ctx.fill();
-      ctx.fillStyle = '#ffffff';
-      ctx.font = '800 24px system-ui, sans-serif';
-      ctx.fillText(special === 'lineH' ? '↔' : '↕', center, special === 'lineH' ? center - 20 : center + 22);
-      ctx.font = '28px system-ui, sans-serif';
-      ctx.fillText(glyph, center, special === 'lineH' ? center + 18 : center - 20);
+      drawFruit(ctx, kind, center, special === 'lineH' ? center + 19 : center - 19, 29);
     } else if (special === 'bomb') {
-      ctx.fillStyle = '#ffffff';
-      ctx.font = '800 40px system-ui, sans-serif';
-      ctx.fillText('✦', center, center);
+      drawFruit(ctx, kind, center, center, 29);
+      ctx.fillStyle = 'rgba(255,255,255,.9)';
+      for (let i = 0; i < 8; i++) {
+        const angle = i * Math.PI / 4;
+        ctx.beginPath();
+        ctx.arc(center + Math.cos(angle) * 25, center + Math.sin(angle) * 25, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
     } else {
-      ctx.font = '40px system-ui, sans-serif';
-      ctx.fillText(glyph, center, center + 2);
+      drawFruit(ctx, kind, center, center + 1, 49);
     }
 
     if (special !== 'none') {
@@ -429,7 +447,7 @@ export class GameScene extends Phaser.Scene {
         const startY = cellCenter(r, c).y - BOARD_H - 120;
         const tile = this.makeTile(r, c, this.grid[r][c], startY);
         this.tiles[r][c] = tile;
-        proms.push(this.moveTile(tile, cellCenter(r, c).y, 45 + r * 32, ANIM.fallEase, ANIM.initialFall));
+        proms.push(this.moveTile(tile, cellCenter(r, c).y, REDUCED_MOTION ? 0 : 45 + r * 32, ANIM.fallEase, ANIM.initialFall));
       }
     }
     Promise.all(proms).then(() => {
@@ -440,12 +458,12 @@ export class GameScene extends Phaser.Scene {
 
   private moveTile(tile: Tile, y: number, delay = 0, ease: string = ANIM.fallEase, duration: number = ANIM.fall): Promise<void> {
     return new Promise((res) => {
-      this.tweens.add({ targets: tile, y, duration, delay, ease, onComplete: () => res() });
+      this.tweens.add({ targets: tile, y, duration: motionMs(duration), delay: REDUCED_MOTION ? 0 : delay, ease, onComplete: () => res() });
     });
   }
   private slideTile(tile: Tile, x: number, y: number): Promise<void> {
     return new Promise((res) => {
-      this.tweens.add({ targets: tile, x, y, duration: ANIM.swap, ease: ANIM.swapEase, onComplete: () => res() });
+      this.tweens.add({ targets: tile, x, y, duration: motionMs(ANIM.swap), ease: ANIM.swapEase, onComplete: () => res() });
     });
   }
 
@@ -540,7 +558,7 @@ export class GameScene extends Phaser.Scene {
         sfxInvalid();
         await Promise.all([this.slideTile(ta, pb.x, pb.y), this.slideTile(tb, pa.x, pa.y)]);
         await Promise.all([this.slideTile(ta, pa.x, pa.y), this.slideTile(tb, pb.x, pb.y)]);
-        this.cameras.main.shake(ANIM.invalidShake, 0.006);
+        if (!REDUCED_MOTION) this.cameras.main.shake(ANIM.invalidShake, 0.006);
         return;
       }
 
@@ -689,8 +707,11 @@ export class GameScene extends Phaser.Scene {
         const old = this.tiles[r][c];
         if (old) this.releaseTile(old);
         const tile = this.makeTile(r, c, kind, cellCenter(r, c).y, special);
-        tile.setScale(0.2);
-        this.tweens.add({ targets: tile, scale: 1, duration: ANIM.specialForge, ease: 'Back.easeOut' });
+        if (REDUCED_MOTION) tile.setScale(1);
+        else {
+          tile.setScale(0.2);
+          this.tweens.add({ targets: tile, scale: 1, duration: ANIM.specialForge, ease: 'Back.easeOut' });
+        }
         this.tiles[r][c] = tile;
         this.specials[r][c] = special;
         this.grid[r][c] = kind;
@@ -763,7 +784,7 @@ export class GameScene extends Phaser.Scene {
     else sfxMatch(step);
 
     const shakeAmt = Math.min(0.004 + (hasBomb ? 0.012 : hasLine ? 0.008 : 0), 0.02);
-    this.cameras.main.shake(hasBomb ? 240 : hasLine ? 180 : 140, shakeAmt || 0.004);
+    if (!REDUCED_MOTION) this.cameras.main.shake(hasBomb ? 240 : hasLine ? 180 : 140, shakeAmt || 0.004);
 
     if (hasBomb) this.popCombo(0, 'BOOM!');
     else if (hasLine) this.popCombo(0, 'ROCKET!');
@@ -775,7 +796,7 @@ export class GameScene extends Phaser.Scene {
     this.killTileTweens(tile);
     return new Promise((res) => {
       this.tweens.add({
-        targets: tile, scale: 1.28, alpha: 0, duration: ANIM.pop, ease: ANIM.popEase,
+        targets: tile, scale: REDUCED_MOTION ? 1 : 1.28, alpha: 0, duration: motionMs(ANIM.pop), ease: ANIM.popEase,
         onComplete: () => { this.releaseTile(tile); res(); },
       });
     });
@@ -784,6 +805,7 @@ export class GameScene extends Phaser.Scene {
   /** Build one reusable emitter per gem colour (called once per scene start). */
   private buildEmitters(): void {
     this.emitters = new Map();
+    if (REDUCED_MOTION) return;
     for (const kind of KINDS) {
       const e = this.add.particles(0, 0, 'spark', {
         speed: { min: 60, max: 240 }, lifespan: 360, scale: { start: 0.85, end: 0 },
@@ -794,12 +816,14 @@ export class GameScene extends Phaser.Scene {
   }
 
   private burst(x: number, y: number, color: number): void {
+    if (REDUCED_MOTION) return;
     // Reuse the pooled emitter for this colour — no per-tile allocation.
     this.emitters.get(color)?.explode(10, x, y);
   }
 
   /** A bright beam sweeping a full row (horizontal) or column, then fading. */
   private beam(horizontal: boolean, r: number, c: number, color: number): void {
+    if (REDUCED_MOTION) return;
     const g = this.add.graphics().setDepth(16).setBlendMode(Phaser.BlendModes.ADD);
     const thick = TILE * 0.5;
     g.fillStyle(0xffffff, 0.9);
@@ -820,6 +844,7 @@ export class GameScene extends Phaser.Scene {
 
   /** Radial flash for a colour-bomb blast. */
   private bombFlash(x: number, y: number, color: number): void {
+    if (REDUCED_MOTION) return;
     const flash = this.add.graphics().setPosition(x, y).setDepth(16).setBlendMode(Phaser.BlendModes.ADD);
     flash.fillStyle(0xffffff, 0.9);
     flash.fillCircle(0, 0, TILE * 0.6);
@@ -885,11 +910,16 @@ export class GameScene extends Phaser.Scene {
     }
     if (this.mode === 'endless' || this.mode === 'time') setModeBest(this.mode, this.score);
     if (this.mode === 'endless') this.movesText.setText(String(getModeBest('endless')));
-    this.tweens.addCounter({
-      from: this.shown, to: this.score, duration: ANIM.scoreCount,
-      onUpdate: (t) => { this.shown = Math.floor(t.getValue() ?? 0); this.scoreText.setText(String(this.shown)); },
-    });
-    this.tweens.add({ targets: this.scoreText, scale: { from: 1.35, to: 1 }, duration: ANIM.scorePulse, ease: 'Back.easeOut' });
+    if (REDUCED_MOTION) {
+      this.shown = this.score;
+      this.scoreText.setText(String(this.score)).setScale(1);
+    } else {
+      this.tweens.addCounter({
+        from: this.shown, to: this.score, duration: ANIM.scoreCount,
+        onUpdate: (t) => { this.shown = Math.floor(t.getValue() ?? 0); this.scoreText.setText(String(this.shown)); },
+      });
+      this.tweens.add({ targets: this.scoreText, scale: { from: 1.28, to: 1 }, duration: ANIM.scorePulse, ease: 'Back.easeOut' });
+    }
   }
 
   private activeColors(): number {
@@ -898,7 +928,7 @@ export class GameScene extends Phaser.Scene {
 
   /** A short fixed-point pause gives cascades a readable rhythm. */
   private cascadeBeat(): Promise<void> {
-    return new Promise((resolve) => { this.time.delayedCall(ANIM.cascadeBeat, resolve); });
+    return new Promise((resolve) => { this.time.delayedCall(motionMs(ANIM.cascadeBeat, 1), resolve); });
   }
 
   private startTimer(): void {
@@ -949,6 +979,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private popCombo(mult: number, text?: string): void {
+    if (REDUCED_MOTION) return;
     this.comboText.setText(text ?? `COMBO x${mult}!`);
     this.comboText.setScale(0.4).setAlpha(1);
     this.tweens.add({ targets: this.comboText, scale: 1.15, duration: ANIM.comboIn, ease: 'Back.easeOut' });
