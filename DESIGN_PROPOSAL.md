@@ -16,7 +16,7 @@ The proposal follows a local run through the menu, Settings, How to Play, Campai
 
 ### Severity 1 — remove before flagship positioning
 
-1. **Emoji are the entire fruit art set.** Every board tile is a platform glyph (`src/game/config.ts:48`), the menu opens with the same six emoji (`src/scenes/MenuScene.ts:24`), collection goals reuse those glyphs (`src/game/levels.ts:70`), Daily share medals are emoji (`src/game/modes.ts:50`), and the lose screen uses a large sad face (`src/scenes/LoseScene.ts:52`). The fruit rendering changes across OS/browser, lacks a shared light source or silhouette discipline, and is the clearest amateur/AI-template tell.
+1. **Emoji are the entire fruit art set.** Every board tile is a platform glyph (`src/game/config.ts:48`), the menu opens with the same six emoji (`src/scenes/MenuScene.ts:24`), and collection goals reuse those glyphs (`src/game/levels.ts:70`). The fruit rendering changes across OS/browser, lacks a shared light source or silhouette discipline, and is the clearest amateur/AI-template tell.
 2. **There is no owned typography.** Buttons use `system-ui` (`src/ui/Button.ts:52`); the menu, HUD, pause, win, loss, settings, and results repeat it (`src/scenes/MenuScene.ts:26`, `src/scenes/GameScene.ts:193`, `src/scenes/PauseScene.ts:41`, `src/scenes/WinScene.ts:55`, `src/scenes/LoseScene.ts:48`, `src/scenes/SettingsScene.ts:30`, `src/scenes/ResultScene.ts:40`). Weight and line breaks will materially vary by platform.
 3. **The rendered game is essentially inaccessible to assistive technology.** The page mounts one Phaser canvas in an otherwise empty game div (`index.html:23`, `index.html:24`, `src/main.ts:13`, `src/main.ts:28`). Menus, mode choices, score, moves, Settings, and results have no DOM roles, accessible names, focus order, or live announcements. Keyboard-only and screen-reader users cannot discover the game structure.
 
@@ -32,8 +32,7 @@ The proposal follows a local run through the menu, Settings, How to Play, Campai
 
 9. **Small logical labels become too small after `FIT` scaling.** HUD labels use 24 px at a 720 px design width (`src/scenes/GameScene.ts:198`, `src/scenes/GameScene.ts:205`) and menu helper text uses 25–27 px (`src/scenes/MenuScene.ts:32`, `src/scenes/MenuScene.ts:52`). On a 390 px-wide phone that is roughly 13–15 CSS px. Bottom utility buttons are 72 logical px high (`src/scenes/MenuScene.ts:63`), about 39 CSS px at that width—below a comfortable all-ages target.
 10. **State is often encoded by fruit color plus an OS-dependent fruit picture.** Distinct emoji silhouettes help today, but a replacement art set must preserve silhouette, internal pattern, and label differences; hue alone cannot identify tile type or special state (`src/game/config.ts:41`, `src/game/config.ts:48`).
-11. **Loss presentation slips into generic mobile-game pathos.** “Out of moves” plus a large `😔` is visibly stock and slightly cringe (`src/scenes/LoseScene.ts:48`, `src/scenes/LoseScene.ts:52`). A precise progress recap and an energetic retry beat are stronger than an emotional emoji.
-12. **Settings are too thin for a flagship shell.** Only sound and music are exposed (`src/scenes/SettingsScene.ts:30`, `src/scenes/SettingsScene.ts:34`, `src/scenes/SettingsScene.ts:39`); there is no reduced motion, haptics, contrast/pattern mode, or input help.
+11. **Settings are too thin for a flagship shell.** Only sound and music are exposed (`src/scenes/SettingsScene.ts:30`, `src/scenes/SettingsScene.ts:34`, `src/scenes/SettingsScene.ts:39`); there is no reduced motion, haptics, contrast/pattern mode, or input help.
 
 ### Specifically not observed
 
